@@ -1,148 +1,156 @@
-import { useState } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db';
-import {
-  GARDEN, classifyGarden, plantStage, seedStage, todayKey,
-  type Entry, type GardenId, type Profile,
-} from '../domain';
-import { askNotice } from '../services/ai';
-import Plant from './Plant';
-import Mood from './Mood';
+import { EMOTIONS, GARDEN, SEASONS, classifyGarden, type Entry, type PersonaId, type DialogueTurn, type ChatMode, type StyleId, type Profile, type GardenId } from '../domain';
 
-// Garden:你嘅成長變成一個花園。唔係 dashboard,唔係統計。
-export default function Garden({ profile }: { profile: Profile }) {
-  const [openCat, setOpenCat] = useState<GardenId | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [noticing, setNoticing] = useState(false);
-  const [showMood, setShowMood] = useState(false);
+export interface AiReply { text: string; longText?: string; safety: boolean; offerSummary?: boolean; }
 
-  const entries = useLiveQuery(
-    () => db.entries.where('profileId').equals(profile.id).toArray(),
-    [profile.id],
-  );
-  const seeds = useLiveQuery(
-    () => db.seeds.where('profileId').equals(profile.id).reverse().sortBy('createdAt'),
-    [profile.id],
-  );
+// 跨日記憶:最近 7 日記錄撮要,注入每次請求
+export async function buildMemory(profileId: string): Promise<string> {
+  const since = Date.now() - 7 * 86400_000;
+  const recent = await db.entries
+    .where('[profileId+createdAt]').between([profileId, since], [profileId, Infinity])
+    .reverse().limit(20).toArray();
+  if (!recent.length) return '';
+  const lines = recent.map((e: Entry) => {
+    const ems = e.emotions.map(x => `${x.name}${x.intensity}`).join('/');
+    return `${e.dateKey} ${ems ? `[${ems}] ` : ''}${e.text.slice(0, 60)}`;
+  });
+  return lines.join('\n');
+}
 
-  if (!entries) return <div className="page"><p className="muted">載入緊…</p></div>;
+interface RequestBody {
+  task: 'checkin' | 'dialogue' | 'summary' | 'notice';
+  ctx: { name: string; personaId: PersonaId; styleId?: StyleId; isFirstResponseToday: boolean; voiceMode: boolean; chatMode: ChatMode };
+  memory: string;
+  topic?: string;
+  payload: {
+    emotions?: { name: string; intensity: number }[];
+    text?: string;
+    history?: DialogueTurn[];
+  };
+}
 
-  const days = new Set(entries.map(e => e.dateKey));
-  const stage = plantStage(days.size);
+// 出錯時唔再扮成一句溫柔說話 —— 誠實講明係技術問題,唔好呃用戶以為 AI 有回應過
+function errorReply(detail: string): AiReply {
+  return { text: `(連唔到 AI:${detail})`, safety: false };
+}
 
-  // 分類:優先用已存嘅 garden,冇就即場用關鍵詞分
-  const byCat = new Map<GardenId, Entry[]>();
-  for (const e of entries) {
+export async function askAi(body: RequestBody): Promise<AiReply> {
+  try {
+    const r = await fetch('/api/respond', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const bodyText = await r.text();
+    if (!r.ok) return errorReply(`HTTP ${r.status} ${bodyText.slice(0, 120)}`);
+
+    let data: any;
+    try { data = JSON.parse(bodyText); }
+    catch { return errorReply(`回應唔係 JSON: ${bodyText.slice(0, 120)}`); }
+
+    if (typeof data?.text !== 'string' || !data.text.trim()) {
+      return errorReply(`回應冇 text 欄位: ${bodyText.slice(0, 120)}`);
+    }
+    return { text: data.text, longText: data.longText, safety: !!data.safety, offerSummary: !!data.offerSummary };
+  } catch (e: any) {
+    return errorReply(e?.message ?? String(e));
+  }
+}
+
+
+// v0.2 Notice:數字喺 code 層數好(誠實準確),AI 只負責用溫柔粵語講返。
+function valenceOf(name: string): number {
+  return EMOTIONS.find(e => e.name === name)?.valence ?? 0;
+}
+
+// 由記錄計出一組可靠嘅事實 line(全部有真實數字支持)
+export function computeNoticeFacts(rows: Entry[]): string[] {
+  const now = Date.now();
+  const mid = now - 7 * 86400_000; // 近七日 vs 前七日嘅分界
+  interface Agg { total: number; recent: number; prior: number; valSum: number; valN: number; }
+  const themes = new Map<GardenId, Agg>();
+
+  // 全期情緒基線(用嚟同個別主題比較 —— 呢個先係真正嘅洞察:
+  // 唔係「你講工作帶負面」,而係「你講工作嗰陣,情緒比你平時仲要低」)
+  let baseSum = 0, baseN = 0;
+  for (const e of rows) for (const em of e.emotions) { baseSum += valenceOf(em.name) * em.intensity; baseN += em.intensity; }
+  const baseline = baseN > 0 ? baseSum / baseN : 0;
+
+  for (const e of rows) {
     const g = e.garden ?? classifyGarden(e.text, e.type);
     if (!g) continue;
-    if (!byCat.has(g)) byCat.set(g, []);
-    byCat.get(g)!.push(e);
+    const a = themes.get(g) ?? { total: 0, recent: 0, prior: 0, valSum: 0, valN: 0 };
+    a.total++;
+    if (e.createdAt >= mid) a.recent++; else a.prior++;
+    for (const em of e.emotions) { a.valSum += valenceOf(em.name) * em.intensity; a.valN += em.intensity; }
+    themes.set(g, a);
   }
 
-  async function runNotice() {
-    setNoticing(true);
-    const res = await askNotice(profile);
-    setNotice(res);
-    setNoticing(false);
+  // 每個 fact 帶一個 priority:數字愈細愈值得講(排前面)。
+  // 意外嘅嘢(消失/激增/情緒關聯)比「淨係數次數」更值得留意。
+  const scored: { p: number; text: string }[] = [];
+
+  // p0 — 突然唔再提(最高洞察:對方通常自己冇為意)
+  for (const [g, a] of themes) {
+    if (a.prior >= 2 && a.recent === 0) {
+      scored.push({ p: 0, text: `${GARDEN[g].name}:前一個星期提過 ${a.prior} 次,近呢個星期一次都冇再提` });
+    }
+  }
+  // p1 — 明顯多咗提
+  for (const [g, a] of themes) {
+    if (a.recent >= 3 && a.recent >= a.prior * 2) {
+      scored.push({ p: 1, text: `${GARDEN[g].name}:近呢個星期明顯多咗諗(前七日 ${a.prior} 次 → 近七日 ${a.recent} 次)` });
+    }
+  }
+  // p2 — 情緒關聯:某主題出現時,情緒明顯偏離你平時
+  for (const [g, a] of themes) {
+    if (a.total >= 3 && a.valN > 0) {
+      const v = a.valSum / a.valN;
+      const diff = v - baseline;
+      if (diff <= -0.22) scored.push({ p: 2, text: `${GARDEN[g].name}:每次提起,你嘅情緒通常都比你呢排平時仲要沉一啲` });
+      else if (diff >= 0.22) scored.push({ p: 2, text: `${GARDEN[g].name}:每次提起,你嘅情緒通常都會鬆返、好返一啲` });
+    }
+  }
+  // p3 — 最常放喺心度嘅主題(top 1)
+  const sorted = [...themes.entries()].filter(([, a]) => a.total >= 3).sort((a, b) => b[1].total - a[1].total);
+  if (sorted.length) {
+    const [g, a] = sorted[0];
+    scored.push({ p: 3, text: `${GARDEN[g].name}:呢兩星期你最多提嘅係呢樣,總共 ${a.total} 次` });
+  }
+  // p4 — 小確幸節奏
+  const joy = rows.filter(e => e.type === 'gratitude').length;
+  if (joy >= 3) scored.push({ p: 4, text: `小確幸:呢兩星期你記低咗 ${joy} 件細細粒嘅開心` });
+  else if (joy === 0 && rows.length >= 6) scored.push({ p: 4, text: `小確幸:呢兩星期你一件細開心都未記低過` });
+  // p5 — 季節傾向(做背景)
+  const seasonRows = rows.map(e => e.season).filter(Boolean) as (keyof typeof SEASONS)[];
+  if (seasonRows.length >= 3) {
+    const counts = seasonRows.reduce<Record<string, number>>((m, s) => (m[s] = (m[s] ?? 0) + 1, m), {});
+    const [dom] = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+    scored.push({ p: 5, text: `季節:呢排你多數揀「${SEASONS[dom as keyof typeof SEASONS].name}」` });
   }
 
-  if (showMood) {
-    return (
-      <div>
-        <div style={{ padding: '16px 18px 0' }}>
-          <button className="chip" onClick={() => setShowMood(false)}>← 返去花園</button>
-        </div>
-        <Mood profile={profile} />
-      </div>
-    );
-  }
+  // 按洞察價值排序,最值得講嘅放前面,最多俾六行俾 model 揀
+  return scored.sort((a, b) => a.p - b.p).slice(0, 6).map(s => s.text);
+}
 
-  return (
-    <div className="page">
-      <h1 className="serif" style={{ fontSize: 22 }}>花園</h1>
+export async function askNotice(profile: Profile): Promise<string> {
+  const since = Date.now() - 14 * 86400_000;
+  const rows = await db.entries
+    .where('[profileId+createdAt]').between([profile.id, since], [profile.id, Infinity])
+    .toArray();
+  if (rows.length < 4) return '暫時記錄唔夠,再寫多幾日,我先睇到啲嘢。';
 
-      <div style={{ textAlign: 'center', marginTop: 4 }}>
-        <Plant stage={stage.key} watered={days.has(todayKey())} />
-        <p style={{ fontSize: 14, color: 'var(--sage-deep)', fontWeight: 500 }}>{stage.label}</p>
-        <p className="muted" style={{ marginTop: 4 }}>
-          {days.size === 0 ? '寫低第一句,種子就會醒' : `你已經陪咗自己 ${days.size} 日`}
-        </p>
-      </div>
+  const facts = computeNoticeFacts(rows);
+  if (facts.length === 0) return '呢排嘅記錄仲未見到明顯規律,再儲多幾日,我先講得準。';
 
-      {/* ── Notice:AI 唔係喺度陪你傾偈,係幫你留意 ── */}
-      <div className="card" style={{ marginTop: 20 }}>
-        <p style={{ fontSize: 14, fontWeight: 500 }}>👁 覺察</p>
-        {!notice && (
-          <>
-            <p className="muted" style={{ marginTop: 6, fontSize: 13, lineHeight: 1.8 }}>
-              叫我睇一次你最近兩星期嘅記錄,講返我留意到嘅 pattern 俾你聽 — 唔分析、唔建議,純粹留意。
-            </p>
-            <button className="btn ghost" style={{ marginTop: 12 }} onClick={runNotice} disabled={noticing}>
-              {noticing ? '睇緊…' : '幫我留意下最近嘅我'}
-            </button>
-          </>
-        )}
-        {notice && (
-          <>
-            <p className="serif" style={{ marginTop: 10, fontSize: 14, lineHeight: 2, whiteSpace: 'pre-wrap' }}>{notice}</p>
-            <button className="chip" style={{ marginTop: 12 }} onClick={() => setNotice(null)}>收埋</button>
-          </>
-        )}
-      </div>
-
-      {/* ── Seeds ── */}
-      <p className="muted" style={{ margin: '24px 0 8px' }}>🌱 種子 — 你講過、值得記住嘅說話</p>
-      {(!seeds || seeds.length === 0) && (
-        <p className="muted" style={{ fontSize: 12 }}>
-          喺「隨手記」寫低一句重要嘅說話,揀「呢句係一粒種子」。佢會喺呢度慢慢生長。
-        </p>
-      )}
-      {seeds?.map(s => {
-        const st = seedStage(s.createdAt);
-        return (
-          <div key={s.id} className="card" style={{ marginBottom: 10, display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-            <span style={{ fontSize: 22, flexShrink: 0 }}>{st.emoji}</span>
-            <span>
-              <p className="serif" style={{ fontSize: 14, lineHeight: 1.8 }}>{s.text}</p>
-              <p className="muted" style={{ fontSize: 11, marginTop: 4 }}>
-                {new Date(s.createdAt).toLocaleDateString('zh-HK', { month: 'long', day: 'numeric' })} 種低 · {st.label}
-              </p>
-            </span>
-          </div>
-        );
-      })}
-
-      {/* ── 花園分類 ── */}
-      <p className="muted" style={{ margin: '24px 0 8px' }}>你嘅人生,而家開緊嘅花</p>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-        {(Object.keys(GARDEN) as GardenId[]).map(g => {
-          const n = byCat.get(g)?.length ?? 0;
-          return (
-            <button key={g} className="card" style={{ textAlign: 'left', opacity: n === 0 ? 0.45 : 1 }}
-              onClick={() => n > 0 && setOpenCat(openCat === g ? null : g)}>
-              <span style={{ fontSize: 22 }}>{GARDEN[g].emoji}</span>
-              <p style={{ fontSize: 14, fontWeight: 500, marginTop: 6 }}>{GARDEN[g].name}</p>
-              <p className="muted" style={{ fontSize: 11, marginTop: 2 }}>{n === 0 ? '未有' : `${n} 段記錄`}</p>
-            </button>
-          );
-        })}
-      </div>
-
-      {openCat && (
-        <div style={{ marginTop: 14 }}>
-          <p className="muted" style={{ marginBottom: 8 }}>{GARDEN[openCat].emoji} {GARDEN[openCat].name}</p>
-          {byCat.get(openCat)!.slice().sort((a, b) => b.createdAt - a.createdAt).slice(0, 20).map(e => (
-            <div key={e.id} className="card" style={{ marginBottom: 8 }}>
-              <p className="muted" style={{ fontSize: 11, marginBottom: 4 }}>{e.dateKey}</p>
-              <p style={{ fontSize: 13, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{e.text.slice(0, 160)}{e.text.length > 160 ? '…' : ''}</p>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <button className="chip" style={{ marginTop: 24 }} onClick={() => setShowMood(true)}>
-        📈 睇下呢排嘅起伏
-      </button>
-    </div>
-  );
+  const res = await askAi({
+    task: 'notice',
+    ctx: {
+      name: profile.name, personaId: profile.personaId, styleId: profile.styleId ?? 'quiet',
+      isFirstResponseToday: false, voiceMode: false, chatMode: profile.chatMode ?? 'companion',
+    },
+    memory: facts.join('\n'),  // 傳「已數好嘅事實」,唔係原始記錄
+    payload: {},
+  });
+  return res.text;
 }

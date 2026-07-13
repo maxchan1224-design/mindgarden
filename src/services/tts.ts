@@ -1,76 +1,89 @@
-import { useState } from 'react';
-import { db } from '../db';
-import { EMOTIONS, todayKey, uid, type Emotion, type Profile, type StyleId } from '../domain';
-import Conversation from './Conversation';
+import { PERSONA_META, type PersonaId, type VoiceLang } from '../domain';
 
-export default function CheckIn({ profile, initialStyle, onDone }: { profile: Profile; initialStyle?: StyleId; onDone: () => void }) {
-  const [picked, setPicked] = useState<Emotion[]>([]);
-  const [intensity, setIntensity] = useState(5);
-  const [text, setText] = useState('');
-  const [entryId, setEntryId] = useState('');
-  const [submitted, setSubmitted] = useState<{ text: string; emotions: Emotion[] } | null>(null);
+let voiceCache: Record<string, SpeechSynthesisVoice | null> = {};
 
-  const toggle = (name: string) =>
-    setPicked(p => p.some(e => e.name === name) ? p.filter(e => e.name !== name) : [...p, { name, intensity }]);
+// 每種語言嘅搜尋策略:揀 Enhanced/Premium 先,其次 localService,最後任何匹配
+function pickVoice(lang: VoiceLang): SpeechSynthesisVoice | null {
+  if (voiceCache[lang] !== undefined) return voiceCache[lang];
 
-  async function submit() {
-    if (!text.trim() && picked.length === 0) return;
-    const id = uid();
-    const emotions = picked.map(e => ({ ...e, intensity }));
-    await db.entries.add({
-      id, profileId: profile.id, type: 'checkin', createdAt: Date.now(), dateKey: todayKey(),
-      emotions, text: text.trim(), dialogue: [],
-    });
-    setEntryId(id);
-    setSubmitted({ text: text.trim(), emotions });
-  }
+  const all = window.speechSynthesis?.getVoices() ?? [];
 
-  return (
-    <div className="page">
-      <p className="muted">情緒簽到</p>
-      {!submitted ? (
-        <>
-          <h2 className="serif" style={{ fontSize: 20, margin: '10px 0 16px' }}>而家有咩感覺?</h2>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {EMOTIONS.map(e => (
-              <button key={e.name} className={`chip ${picked.some(p => p.name === e.name) ? 'on' : ''}`} onClick={() => toggle(e.name)}>
-                {e.name}
-              </button>
-            ))}
-          </div>
-          {picked.length > 0 && (
-            <div className="card" style={{ marginTop: 16 }}>
-              <p className="muted" style={{ marginBottom: 10 }}>有幾強烈? {intensity}/10</p>
-              <input type="range" min={1} max={10} step={1} value={intensity}
-                onChange={e => setIntensity(Number(e.target.value))} style={{ width: '100%' }} />
-            </div>
-          )}
-          <textarea className="entry" style={{ marginTop: 16 }} placeholder="發生咗咩事?想講幾多都得…"
-            value={text} onChange={e => setText(e.target.value)} />
-          <button className="btn primary" style={{ marginTop: 16 }} onClick={submit}>記低</button>
-        </>
-      ) : (
-        <>
-          <div className="card" style={{ marginTop: 12 }}>
-            {submitted.emotions.length > 0 && (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: submitted.text ? 10 : 0 }}>
-                {submitted.emotions.map(e => (
-                  <span key={e.name} className="chip" style={{ fontSize: 12, padding: '4px 10px' }}>{e.name} {e.intensity}/10</span>
-                ))}
-              </div>
-            )}
-            {submitted.text && <p style={{ fontSize: 14, lineHeight: 1.7 }}>{submitted.text}</p>}
-          </div>
-          <Conversation
-            profile={profile}
-            initialStyle={initialStyle}
-            entryId={entryId}
-            initialText={submitted.text || `我而家覺得${submitted.emotions.map(e => e.name).join('、')}`}
-            emotions={submitted.emotions}
-            onDone={onDone}
-          />
-        </>
-      )}
-    </div>
-  );
+  const FALLBACK_MAP: Record<VoiceLang, string[]> = {
+    yue: ['zh-HK', 'zh_HK'],
+    cmn: ['zh-CN', 'zh_CN', 'zh-TW', 'zh'],
+    en:  ['en-GB', 'en-AU', 'en-US', 'en'],
+  };
+  const tags = FALLBACK_MAP[lang];
+  const pool = all.filter(v => tags.some((tag: string) => v.lang.startsWith(tag)));
+
+  const picked =
+    pool.find(v => /enhanced|premium/i.test(v.name)) ||
+    pool.find(v => v.localService) ||
+    pool[0] ||
+    null;
+
+  voiceCache[lang] = picked;
+  return picked;
+}
+
+// 三語對應嘅 BCP-47 tag(傳俾 SpeechSynthesisUtterance.lang)
+const LANG_BCP47: Record<VoiceLang, string> = {
+  yue: 'zh-HK',
+  cmn: 'zh-CN',
+  en:  'en-GB',
+};
+
+// 讀出有話俾 user 知係邊把聲嘅簡單描述(喺設定頁試聽用)
+export const VOICE_LANG_LABELS: Record<VoiceLang, string> = {
+  yue: '粵語',
+  cmn: '普通話',
+  en:  'English',
+};
+
+// iOS voice list 係 lazy load,預熱一次
+if ('speechSynthesis' in window) {
+  window.speechSynthesis.onvoiceschanged = () => {
+    voiceCache = {};
+  };
+}
+
+export function speak(
+  text: string,
+  personaId: PersonaId,
+  voiceLang: VoiceLang = 'yue',
+  onEnd?: () => void,
+): boolean {
+  if (!('speechSynthesis' in window)) return false;
+  window.speechSynthesis.cancel();
+
+  const u = new SpeechSynthesisUtterance(text);
+  const v = pickVoice(voiceLang);
+  if (v) u.voice = v;
+  u.lang = LANG_BCP47[voiceLang];
+  u.rate = PERSONA_META[personaId].rate;
+  u.pitch = PERSONA_META[personaId].pitch;
+  if (onEnd) u.onend = onEnd;
+
+  window.speechSynthesis.speak(u);
+  return true;
+}
+
+export function stopSpeaking() {
+  window.speechSynthesis?.cancel();
+}
+
+// 試聽:喺設定頁俾用戶撳掣聽吓把聲
+export function speakSample(voiceLang: VoiceLang, personaId: PersonaId) {
+  const samples: Record<VoiceLang, string> = {
+    yue: '你好,我係你嘅陪伴。',
+    cmn: '你好，我是你的陪伴。',
+    en:  'Hello, I\'m here with you.',
+  };
+  speak(samples[voiceLang], personaId, voiceLang);
+}
+
+export function hasEnhancedVoice(lang: VoiceLang = 'yue'): boolean {
+  const all = window.speechSynthesis?.getVoices() ?? [];
+  const tags = { yue: 'zh-HK', cmn: 'zh-CN', en: 'en' }[lang];
+  return all.some(v => v.lang.startsWith(tags) && /enhanced|premium/i.test(v.name));
 }

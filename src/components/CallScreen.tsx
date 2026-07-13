@@ -1,78 +1,28 @@
-import { useState } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../db';
-import { moodOfDay, todayKey, type Entry, type Profile } from '../domain';
+import { PERSONA_META, type PersonaId } from '../domain';
 
-export default function Mood({ profile }: { profile: Profile }) {
-  const [range, setRange] = useState<7 | 30>(30);
-
-  const data = useLiveQuery(async () => {
-    const since = Date.now() - range * 86400_000;
-    const entries = await db.entries
-      .where('[profileId+createdAt]').between([profile.id, since], [profile.id, Infinity]).toArray();
-    const byDay = new Map<string, Entry[]>();
-    for (const e of entries) {
-      if (!byDay.has(e.dateKey)) byDay.set(e.dateKey, []);
-      byDay.get(e.dateKey)!.push(e);
-    }
-    const days: { key: string; mood: number | null }[] = [];
-    for (let i = range - 1; i >= 0; i--) {
-      const d = new Date(Date.now() - i * 86400_000);
-      const key = todayKey(d);
-      days.push({ key, mood: byDay.has(key) ? moodOfDay(byDay.get(key)!) : null });
-    }
-    const counts = new Map<string, number>();
-    for (const e of entries) for (const em of e.emotions) counts.set(em.name, (counts.get(em.name) ?? 0) + 1);
-    const top = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
-    return { days, top, total: entries.length };
-  }, [profile.id, range]);
-
-  const days = data?.days ?? [];
-  const W = 300, H = 110, pad = 10;
-  const step = days.length > 1 ? (W - pad * 2) / (days.length - 1) : 0;
-  const y = (v: number) => H / 2 - v * (H / 2 - pad);
-
-  // 冇記錄嘅日子留 gap,唔會跌落零
-  const segments: string[] = [];
-  let seg: string[] = [];
-  days.forEach((d, i) => {
-    if (d.mood === null) { if (seg.length > 1) segments.push(seg.join(' ')); seg = []; return; }
-    seg.push(`${seg.length === 0 ? 'M' : 'L'}${(pad + i * step).toFixed(1)} ${y(d.mood).toFixed(1)}`);
-  });
-  if (seg.length > 1) segments.push(seg.join(' '));
-  const dots = days.map((d, i) => d.mood === null ? null : { x: pad + i * step, y: y(d.mood) }).filter(Boolean) as { x: number; y: number }[];
-
+// 應要求:唔再係全螢幕 overlay,改做 app 內一張浮動卡,唔會遮住成個介面
+export default function CallScreen({
+  personaId, onAccept, onDecline,
+}: { personaId: PersonaId; onAccept: () => void; onDecline: () => void }) {
+  const p = PERSONA_META[personaId];
   return (
-    <div className="page">
-      <h1 className="serif" style={{ fontSize: 22 }}>心情起伏</h1>
-      <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-        {[30, 7].map(r => (
-          <button key={r} className={`chip ${range === r ? 'on' : ''}`} onClick={() => setRange(r as 7 | 30)}>{r}日</button>
-        ))}
+    <div className="call-card" role="dialog" aria-label={`${p.name}想同你講幾句`}>
+      <div className="call-avatar">
+        <svg width="30" height="30" viewBox="0 0 56 56" aria-hidden="true">
+          <circle cx="28" cy="21" r="11" fill="#8D87AD" />
+          <path d="M8 50 C10 37 19 32 28 32 C37 32 46 37 48 50 Z" fill="#B7B2CC" />
+        </svg>
       </div>
-      <div className="card" style={{ marginTop: 14 }}>
-        {data?.total ? (
-          <svg width="100%" viewBox={`0 0 ${W} ${H + 20}`} aria-label={`${range}日心情曲線`}>
-            <line x1={pad} y1={H / 2} x2={W - pad} y2={H / 2} stroke="var(--line)" strokeWidth="1" />
-            {segments.map((d, i) => (
-              <path key={i} d={d} fill="none" stroke="var(--sage)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-            ))}
-            {dots.map((p, i) => <circle key={i} cx={p.x} cy={p.y} r="3.5" fill="var(--dusk)" />)}
-            <text x={pad} y={H + 16} fontSize="10" fill="var(--faint)">{days[0]?.key.slice(5)}</text>
-            <text x={W - pad} y={H + 16} fontSize="10" fill="var(--faint)" textAnchor="end">今日</text>
-          </svg>
-        ) : (
-          <p className="muted" style={{ textAlign: 'center', padding: '24px 0' }}>寫低第一次簽到,呢度就會開始有你嘅曲線</p>
-        )}
+      <div style={{ flex: 1 }}>
+        <p className="serif" style={{ fontSize: 15, margin: 0 }}>{p.name}</p>
+        <p className="muted" style={{ fontSize: 12, margin: '2px 0 0' }}>想同你講幾句 · 語音</p>
       </div>
-      {!!data?.top.length && (
-        <>
-          <p className="muted" style={{ margin: '18px 0 8px' }}>呢排最常出現</p>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {data.top.map(([name, n]) => <span key={name} className="chip">{name} ×{n}</span>)}
-          </div>
-        </>
-      )}
+      <button className="call-round decline" onClick={onDecline} aria-label="睇文字">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M4 6h16M4 10h16M4 14h10" /></svg>
+      </button>
+      <button className="call-round accept" onClick={onAccept} aria-label="接聽語音">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6.6 10.8a15 15 0 006.6 6.6l2.2-2.2a1 1 0 011-.24 11 11 0 003.5.56 1 1 0 011 1V20a1 1 0 01-1 1A17 17 0 013 4a1 1 0 011-1h3.5a1 1 0 011 1 11 11 0 00.56 3.5 1 1 0 01-.25 1z" /></svg>
+      </button>
     </div>
   );
 }
