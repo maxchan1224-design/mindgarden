@@ -72,14 +72,19 @@ async function handleRespond(request: Request, env: Env): Promise<Response> {
 
     let raw: any = '';
     try {
+      const t0 = Date.now();
       const result: any = await env.AI.run(MODEL, {
         messages,
-        max_tokens: 4000,
+        // 回應係傾偈用,唔係寫文,900 token 夠好長一段。上次爆 token 嘅原因係
+        // reasoning 冇關到,而唔係上限太細 —— 而家 reasoning 關咗,上限唔使開到咁大,
+        // 上限細返仲可以縮短生成時間。
+        max_tokens: 900,
         temperature: 0.85,
         // GLM 系列都係 reasoning model,預設會先「諗」先答,思考內容食晒 token 令 content 變 null。
         // 我哋淨係要佢傾偈,唔需要推理過程,所以關咗 reasoning。
         reasoning: { enabled: false },
       });
+      console.log(`AI.run took ${Date.now() - t0}ms`);
       raw =
         (typeof result === 'string' ? result : '') ||
         result?.choices?.[0]?.message?.content ||
@@ -91,7 +96,7 @@ async function handleRespond(request: Request, env: Env): Promise<Response> {
       if (!raw && result?.choices?.[0]?.finish_reason === 'length') {
         const retry: any = await env.AI.run(MODEL, {
           messages,
-          max_tokens: 6000,
+          max_tokens: 1500,
           temperature: 0.85,
           reasoning: { enabled: false },
         });
@@ -161,12 +166,14 @@ async function handleDebug(env: Env): Promise<Response> {
     return json({ ok: false, stage: 'binding', error: 'env.AI 唔存在' });
   }
   try {
+    const t0 = Date.now();
     const result: any = await env.AI.run(MODEL, {
       messages: [{ role: 'user', content: '用一句廣東話講聲你好。' }],
       max_tokens: 500,
       reasoning: { enabled: false },
     });
-    return json({ ok: true, model: MODEL, raw: result });
+    const ms = Date.now() - t0;
+    return json({ ok: true, model: MODEL, ms, raw: result });
   } catch (e: any) {
     return json({ ok: false, stage: 'ai.run', model: MODEL, error: e?.message ?? String(e) });
   }
