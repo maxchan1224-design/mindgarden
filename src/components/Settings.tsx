@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, setActiveProfileId } from '../db';
-import { PERSONA_META, uid, type ChatMode, type PersonaId, type Profile, type ResponseMode } from '../domain';
-import { hasEnhancedVoice } from '../services/tts';
+import { PERSONA_META, uid, type ChatMode, type PersonaId, type Profile, type ResponseMode, type VoiceLang } from '../domain';
+import { hasEnhancedVoice, speakSample, VOICE_LANG_LABELS } from '../services/tts';
 
 const CHAT_MODES: { id: ChatMode; label: string; desc: string }[] = [
   { id: 'companion', label: '溫柔陪伴', desc: '先聽你講,慢慢嚟。需要分析嗰陣一樣會分析' },
@@ -24,7 +24,7 @@ export default function Settings({ profile, onSwitch }: { profile: Profile; onSw
   async function addProfile() {
     const name = newName.trim();
     if (!name) return;
-    const p: Profile = { id: uid(), name, personaId: 'aqing', responseMode: 'ask', chatMode: 'companion', createdAt: Date.now() };
+    const p: Profile = { id: uid(), name, personaId: 'aqing', responseMode: 'ask', chatMode: 'companion', voiceLang: 'yue', createdAt: Date.now() };
     await db.profiles.add(p);
     setNewName('');
   }
@@ -75,6 +75,25 @@ export default function Settings({ profile, onSwitch }: { profile: Profile; onSw
           style={{ width: '100%', textAlign: 'left', marginBottom: 8, border: profile.responseMode === m.id ? '1.5px solid var(--sage)' : '1.5px solid transparent' }}>
           <span style={{ fontSize: 15, fontWeight: 500 }}>{m.label}</span>
           <span className="muted" style={{ display: 'block', marginTop: 2, fontSize: 12 }}>{m.desc}</span>
+        </button>
+      ))}
+
+      <p className="muted" style={{ margin: '18px 0 8px' }}>語音語言</p>
+      {(['yue','cmn','en'] as VoiceLang[]).map(lang => (
+        <button key={lang} className="card"
+          onClick={() => update({ voiceLang: lang })}
+          style={{ width:'100%', textAlign:'left', marginBottom:8, display:'flex', justifyContent:'space-between', alignItems:'center', border: (profile.voiceLang ?? 'yue') === lang ? '1.5px solid var(--sage)' : '1.5px solid transparent' }}>
+          <span>
+            <span style={{ fontSize:15, fontWeight:500 }}>{VOICE_LANG_LABELS[lang]}</span>
+            <span className="muted" style={{ marginLeft:10, fontSize:12 }}>
+              { lang === 'yue' ? '廣東話' : lang === 'cmn' ? 'Mandarin Chinese' : 'English' }
+            </span>
+          </span>
+          <button
+            style={{ fontSize:12, color:'var(--dusk-deep)', background:'var(--dusk-bg)', border:'none', borderRadius:999, padding:'5px 12px' }}
+            onClick={e => { e.stopPropagation(); speakSample(lang, profile.personaId); }}>
+            試聽
+          </button>
         </button>
       ))}
 
