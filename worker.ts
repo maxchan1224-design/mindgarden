@@ -74,8 +74,11 @@ async function handleRespond(request: Request, env: Env): Promise<Response> {
     try {
       const result: any = await env.AI.run(MODEL, {
         messages,
-        max_tokens: 2000,
+        max_tokens: 4000,
         temperature: 0.85,
+        // GLM 系列都係 reasoning model,預設會先「諗」先答,思考內容食晒 token 令 content 變 null。
+        // 我哋淨係要佢傾偈,唔需要推理過程,所以關咗 reasoning。
+        reasoning: { enabled: false },
       });
       raw =
         (typeof result === 'string' ? result : '') ||
@@ -84,9 +87,18 @@ async function handleRespond(request: Request, env: Env): Promise<Response> {
         result?.result?.response ||
         '';
 
-      // 最後保險:如果 thinking 關唔到而 content 仍然係 null,起碼攞返啲嘢出嚟
+      // 最後保險:如果關咗 reasoning 都仲爆 token,自動用更大上限重試一次
       if (!raw && result?.choices?.[0]?.finish_reason === 'length') {
-        return json({ text: '(AI 諗得太耐,答唔切。請再試一次。)', safety: false });
+        const retry: any = await env.AI.run(MODEL, {
+          messages,
+          max_tokens: 6000,
+          temperature: 0.85,
+          reasoning: { enabled: false },
+        });
+        raw = retry?.choices?.[0]?.message?.content || retry?.response || '';
+        if (!raw) {
+          return json({ text: '(AI 而家有啲繁忙,請再試一次。)', safety: false });
+        }
       }
 
       // content 有時唔係純文字(可能係 array of parts 或者 object),強制轉做 string
@@ -152,6 +164,7 @@ async function handleDebug(env: Env): Promise<Response> {
     const result: any = await env.AI.run(MODEL, {
       messages: [{ role: 'user', content: '用一句廣東話講聲你好。' }],
       max_tokens: 500,
+      reasoning: { enabled: false },
     });
     return json({ ok: true, model: MODEL, raw: result });
   } catch (e: any) {
