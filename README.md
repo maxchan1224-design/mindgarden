@@ -1,4 +1,4 @@
-# 心庭 Mind Garden
+# Mind Garden
 
 每日幾分鐘,陪自己一陣。Offline-first PWA,粵語 AI 陪伴回應。
 
