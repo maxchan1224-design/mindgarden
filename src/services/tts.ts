@@ -1,38 +1,69 @@
-import { PERSONA_META, type PersonaId } from '../domain';
+import { PERSONA_META, type PersonaId, type VoiceLang } from '../domain';
 
-let cachedVoice: SpeechSynthesisVoice | null = null;
+let voiceCache: Record<string, SpeechSynthesisVoice | null> = {};
 
-// iOS 內置粵語聲有兩種質素:預設 "Compact"(機械)同 "Enhanced/Premium"(自然好多)。
-// Safari 會將已下載嘅 Enhanced 聲放喺 voice list,揀名入面有 Enhanced/Premium 嘅優先。
-function pickCantoneseVoice(): SpeechSynthesisVoice | null {
-  if (cachedVoice) return cachedVoice;
-  const voices = window.speechSynthesis?.getVoices() ?? [];
-  const zhHK = voices.filter(v => v.lang === 'zh-HK' || v.lang.startsWith('zh-HK'));
-  cachedVoice =
-    zhHK.find(v => /enhanced|premium/i.test(v.name)) ||
-    zhHK.find(v => v.localService) ||
-    zhHK[0] ||
-    voices.find(v => v.lang.startsWith('zh')) ||
+// 每種語言嘅搜尋策略:揀 Enhanced/Premium 先,其次 localService,最後任何匹配
+function pickVoice(lang: VoiceLang): SpeechSynthesisVoice | null {
+  if (voiceCache[lang] !== undefined) return voiceCache[lang];
+
+  const all = window.speechSynthesis?.getVoices() ?? [];
+
+  const FALLBACK_MAP: Record<VoiceLang, string[]> = {
+    yue: ['zh-HK', 'zh_HK'],
+    cmn: ['zh-CN', 'zh_CN', 'zh-TW', 'zh'],
+    en:  ['en-GB', 'en-AU', 'en-US', 'en'],
+  };
+  const tags = FALLBACK_MAP[lang];
+  const pool = all.filter(v => tags.some((tag: string) => v.lang.startsWith(tag)));
+
+  const picked =
+    pool.find(v => /enhanced|premium/i.test(v.name)) ||
+    pool.find(v => v.localService) ||
+    pool[0] ||
     null;
-  return cachedVoice;
+
+  voiceCache[lang] = picked;
+  return picked;
 }
 
-export function hasEnhancedVoice(): boolean {
-  const voices = window.speechSynthesis?.getVoices() ?? [];
-  return voices.some(v => v.lang.startsWith('zh-HK') && /enhanced|premium/i.test(v.name));
+// 三語對應嘅 BCP-47 tag(傳俾 SpeechSynthesisUtterance.lang)
+const LANG_BCP47: Record<VoiceLang, string> = {
+  yue: 'zh-HK',
+  cmn: 'zh-CN',
+  en:  'en-GB',
+};
+
+// 讀出有話俾 user 知係邊把聲嘅簡單描述(喺設定頁試聽用)
+export const VOICE_LANG_LABELS: Record<VoiceLang, string> = {
+  yue: '粵語',
+  cmn: '普通話',
+  en:  'English',
+};
+
+// iOS voice list 係 lazy load,預熱一次
+if ('speechSynthesis' in window) {
+  window.speechSynthesis.onvoiceschanged = () => {
+    voiceCache = {};
+  };
 }
 
-// iOS 需要 user gesture 之後先出聲 — 所以永遠由撳掣觸發
-export function speak(text: string, personaId: PersonaId, onEnd?: () => void): boolean {
+export function speak(
+  text: string,
+  personaId: PersonaId,
+  voiceLang: VoiceLang = 'yue',
+  onEnd?: () => void,
+): boolean {
   if (!('speechSynthesis' in window)) return false;
   window.speechSynthesis.cancel();
+
   const u = new SpeechSynthesisUtterance(text);
-  const v = pickCantoneseVoice();
+  const v = pickVoice(voiceLang);
   if (v) u.voice = v;
-  u.lang = 'zh-HK';
+  u.lang = LANG_BCP47[voiceLang];
   u.rate = PERSONA_META[personaId].rate;
   u.pitch = PERSONA_META[personaId].pitch;
   if (onEnd) u.onend = onEnd;
+
   window.speechSynthesis.speak(u);
   return true;
 }
@@ -41,6 +72,18 @@ export function stopSpeaking() {
   window.speechSynthesis?.cancel();
 }
 
-if ('speechSynthesis' in window) {
-  window.speechSynthesis.onvoiceschanged = () => { cachedVoice = null; pickCantoneseVoice(); };
+// 試聽:喺設定頁俾用戶撳掣聽吓把聲
+export function speakSample(voiceLang: VoiceLang, personaId: PersonaId) {
+  const samples: Record<VoiceLang, string> = {
+    yue: '你好,我係你嘅陪伴。',
+    cmn: '你好，我是你的陪伴。',
+    en:  'Hello, I\'m here with you.',
+  };
+  speak(samples[voiceLang], personaId, voiceLang);
+}
+
+export function hasEnhancedVoice(lang: VoiceLang = 'yue'): boolean {
+  const all = window.speechSynthesis?.getVoices() ?? [];
+  const tags = { yue: 'zh-HK', cmn: 'zh-CN', en: 'en' }[lang];
+  return all.some(v => v.lang.startsWith(tags) && /enhanced|premium/i.test(v.name));
 }
