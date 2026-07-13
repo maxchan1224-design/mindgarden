@@ -32,9 +32,13 @@ interface Body {
   };
 }
 
-// GLM-4.7-Flash(智譜 AI / Z.ai)— 中國公司出品,中文係佢嘅原生能力,唔似歐美 model 要「翻譯」出中文。
-// 正確 model ID 命名空間係 @cf/zai-org/(唔係 @cf/zhipuai/— 呢個係之前試錯嘅位)。
-const MODEL = '@cf/zai-org/glm-4.7-flash';
+// Gemma 3 12B(Google)— 非 reasoning model,冇隱藏思考階段。
+// 之前試過嘅 Qwen3-30B-A3B 同 GLM-4.7-Flash 都係 reasoning-locked MoE,
+// thinking 焼死喺 model 訓練入面,官方冇公開任何參數可以完全關閉,
+// 所以會不斷「諗到爆晒 token」→ content 變 null → 前端見到錯誤或者好慢。
+// Gemma 3 係一般 instruct model,答案直出,速度穩定,唔會有呢種病。
+// 128K context,多語言支援。中文/粵語未必及 GLM 咁地道,但快、穩、唔會斷。
+const MODEL = '@cf/google/gemma-3-12b-it';
 
 async function handleRespond(request: Request, env: Env): Promise<Response> {
   try {
@@ -75,14 +79,8 @@ async function handleRespond(request: Request, env: Env): Promise<Response> {
       const t0 = Date.now();
       const result: any = await env.AI.run(MODEL, {
         messages,
-        // 回應係傾偈用,唔係寫文,900 token 夠好長一段。上次爆 token 嘅原因係
-        // reasoning 冇關到,而唔係上限太細 —— 而家 reasoning 關咗,上限唔使開到咁大,
-        // 上限細返仲可以縮短生成時間。
         max_tokens: 900,
         temperature: 0.85,
-        // GLM 系列都係 reasoning model,預設會先「諗」先答,思考內容食晒 token 令 content 變 null。
-        // 我哋淨係要佢傾偈,唔需要推理過程,所以關咗 reasoning。
-        reasoning: { enabled: false },
       });
       console.log(`AI.run took ${Date.now() - t0}ms`);
       raw =
@@ -92,14 +90,9 @@ async function handleRespond(request: Request, env: Env): Promise<Response> {
         result?.result?.response ||
         '';
 
-      // 最後保險:如果關咗 reasoning 都仲爆 token,自動用更大上限重試一次
+      // 防禦性保險(非 reasoning model 理論上唔會撞到,但留住以防萬一)
       if (!raw && result?.choices?.[0]?.finish_reason === 'length') {
-        const retry: any = await env.AI.run(MODEL, {
-          messages,
-          max_tokens: 1500,
-          temperature: 0.85,
-          reasoning: { enabled: false },
-        });
+        const retry: any = await env.AI.run(MODEL, { messages, max_tokens: 1500, temperature: 0.85 });
         raw = retry?.choices?.[0]?.message?.content || retry?.response || '';
         if (!raw) {
           return json({ text: '(AI 而家有啲繁忙,請再試一次。)', safety: false });
@@ -170,7 +163,6 @@ async function handleDebug(env: Env): Promise<Response> {
     const result: any = await env.AI.run(MODEL, {
       messages: [{ role: 'user', content: '用一句廣東話講聲你好。' }],
       max_tokens: 500,
-      reasoning: { enabled: false },
     });
     const ms = Date.now() - t0;
     return json({ ok: true, model: MODEL, ms, raw: result });
