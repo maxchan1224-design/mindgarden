@@ -1,104 +1,56 @@
-import { useEffect, useState } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db, getActiveProfileId, setActiveProfileId } from './db';
-import { uid, type Profile } from './domain';
-import Home, { type Practice } from './components/Home';
-import CheckIn from './components/CheckIn';
-import Dialogue from './components/Dialogue';
-import Body from './components/Body';
-import Gratitude from './components/Gratitude';
-import Journal from './components/Journal';
-import Mood from './components/Mood';
-import Settings from './components/Settings';
+# MindGarden
 
-type Tab = 'home' | 'journal' | 'mood' | 'settings';
+每日幾分鐘,陪自己一陣。Offline-first PWA,粵語 AI 陪伴回應。
 
-function Onboarding({ onDone }: { onDone: (p: Profile) => void }) {
-  const [name, setName] = useState('');
-  async function start() {
-    const n = name.trim();
-    if (!n) return;
-    const p: Profile = {
-      id: uid(), name: n, personaId: 'aqing', responseMode: 'ask',
-      chatMode: 'companion', createdAt: Date.now(),
-    };
-    await db.profiles.add(p);
-    setActiveProfileId(p.id);
-    onDone(p);
-  }
-  return (
-    <div className="page" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', minHeight: '80dvh' }}>
-      <h1 className="serif" style={{ fontSize: 28 }}>MindGarden</h1>
-      <p className="muted" style={{ marginTop: 10, lineHeight: 1.8 }}>每日幾分鐘,陪自己一陣。<br />你嘅記錄只會留喺呢部裝置。</p>
-      <p style={{ marginTop: 36, fontSize: 15 }}>想我哋點稱呼你?</p>
-      <div className="card" style={{ marginTop: 12 }}>
-        <input autoFocus style={{ border: 'none', background: 'none', width: '100%', outline: 'none' }}
-          placeholder="你嘅名…" value={name} onChange={e => setName(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && start()} />
-      </div>
-      <button className="btn primary" style={{ marginTop: 20 }} onClick={start}>開始</button>
-    </div>
-  );
-}
+## 快速部署(唔使本地 toolchain)
 
-const TABS: { id: Tab; label: string; icon: JSX.Element }[] = [
-  { id: 'home', label: '主頁', icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M12 21V11m0 0C12 7 9 5 5 5c0 4 3 6 7 6zm0-2c0-3 2.5-5 6-5 0 3-2.5 5-6 5z"/></svg> },
-  { id: 'journal', label: '日記', icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M5 4h13a1 1 0 011 1v15H6a1 1 0 01-1-1zM8 8h8M8 12h8M8 16h5"/></svg> },
-  { id: 'mood', label: '起伏', icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M3 15c3-6 5 2 8-4s5 2 10-4"/></svg> },
-  { id: 'settings', label: '設定', icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 00-.1-1.2l2-1.5-2-3.4-2.3 1a7 7 0 00-2-1.2L14 3h-4l-.5 2.7a7 7 0 00-2 1.2l-2.4-1-2 3.4 2 1.5a7 7 0 000 2.4l-2 1.5 2 3.4 2.3-1a7 7 0 002 1.2L10 21h4l.5-2.7a7 7 0 002-1.2l2.4 1 2-3.4-2-1.5c.06-.4.1-.8.1-1.2z"/></svg> },
-];
+1. **上載去 GitHub**
+   - 開一個新 repo(private 都得)
+   - 將呢個 folder 全部內容 push 上去(唔使包括 `node_modules` / `dist`)
 
-export default function App() {
-  const [tab, setTab] = useState<Tab>('home');
-  const [practice, setPractice] = useState<Practice | null>(null);
-  const [profileId, setProfileId] = useState<string | null>(getActiveProfileId());
-  const [ready, setReady] = useState(false);
+2. **連接 Cloudflare Pages**
+   - Cloudflare dashboard → Workers & Pages → Create → Pages → Connect to Git
+   - 揀個 repo,framework preset 揀 **Vite**
+   - Build command: `npm run build`,output directory: `dist`
 
-  const profile = useLiveQuery(
-    async () => (profileId ? await db.profiles.get(profileId) : undefined),
-    [profileId],
-  );
+3. **AI 唔使另外設定**
+   - AI 用嘅係 Cloudflare Workers AI(`wrangler.jsonc` 入面嘅 `ai` binding),
+     同一個 Cloudflare 帳戶自動生效,唔使另外攞 API key
+   - 之所以唔用 Gemini/Claude 直連:兩者官方 API 都未開放俾香港地區,
+     Workers AI 行喺 Cloudflare 自己平台入面,冇呢個地區限制
 
-  useEffect(() => {
-    (async () => {
-      const id = getActiveProfileId();
-      if (id && (await db.profiles.get(id))) setProfileId(id);
-      else {
-        const first = await db.profiles.orderBy('createdAt').first();
-        if (first) { setActiveProfileId(first.id); setProfileId(first.id); }
-        else setProfileId(null);
-      }
-      setReady(true);
-    })();
-  }, []);
+4. **iPhone 安裝**
+   - Safari 開你嘅 `xxx.pages.dev` → 分享 → 加至主畫面
 
-  if (!ready) return null;
-  if (!profileId || !profile) return <Onboarding onDone={p => setProfileId(p.id)} />;
+之後每次 push 到 main 就自動 deploy;push 到其他 branch 會有獨立 preview URL。
 
-  const done = () => { setPractice(null); setTab('home'); };
+## 已有功能(v0.1)
 
-  return (
-    <>
-      {practice === 'checkin' && <CheckIn key="c" profile={profile} onDone={done} />}
-      {practice === 'dialogue' && <Dialogue key="d" profile={profile} onDone={done} />}
-      {practice === 'body' && <Body key="b" profile={profile} onDone={done} />}
-      {practice === 'gratitude' && <Gratitude key="g" profile={profile} onDone={done} />}
+- 首頁植物:由種子開始,按累積活躍日數生長(唔係 streak,永遠唔會枯萎)
+- 情緒簽到:多選情緒 + 強度 + 自由書寫
+- AI 回應:三個 persona(阿晴/曉嵐/小澄),先反映後一問,永不說教
+- 語音回應:iOS 系統粵語聲(免費、offline);「每次問我」模式會彈出來電畫面
+- 對話延續:「想傾多啲」多輪對話,全 history 帶入每次請求
+- 跨日記憶:最近七日記錄自動注入 prompt,AI 記得你講過嘅嘢
+- 心情起伏:7/30日 valence 曲線,冇記錄嘅日子留 gap 唔會跌零
+- 多空間:同一部機可開多個 profile,記錄完全隔離
+- Safety layer:危機字眼觸發時停止提問,顯示香港支援熱線
+- 匯出 JSON;所有數據只存本機 IndexedDB
 
-      {!practice && tab === 'home' && <Home profile={profile} onOpen={setPractice} />}
-      {!practice && tab === 'journal' && <Journal profile={profile} />}
-      {!practice && tab === 'mood' && <Mood profile={profile} />}
-      {!practice && tab === 'settings' && (
-        <Settings profile={profile} onSwitch={() => { setProfileId(getActiveProfileId()); setTab('home'); }} />
-      )}
+## 未做(roadmap)
 
-      <nav className="tabbar" aria-label="主導航">
-        {TABS.map(t => (
-          <button key={t.id} className={!practice && tab === t.id ? 'on' : ''}
-            onClick={() => { setPractice(null); setTab(t.id); }} aria-label={t.label}>
-            {t.icon}<span>{t.label}</span>
-          </button>
-        ))}
-      </nav>
-    </>
-  );
-}
+Body map、小確幸、日結/週結、Insights dashboard、Life Wiki、Growth Book、
+Decision Journal、Future Me、cloud TTS 自然聲、加密雲端同步、跨裝置帳戶。
+
+## 換 AI model
+
+改 `functions/api/respond.ts` 入面嘅 `MODEL` / `GEMINI_URL` / `callModel` 部分。
+所有 prompt 喺 `functions/lib/prompts.ts`,係唯一真相來源。
+
+## 隱私
+
+所有記錄存喺用戶裝置嘅 IndexedDB。只有觸發 AI 回應嗰刻,
+當次內容 + 最近七日撮要會經 Cloudflare Function 送去 LLM。
+上線前請覆核 `HK_CRISIS_RESOURCES` 嘅熱線號碼。
+
+MindGarden 唔係醫療或心理治療產品。
