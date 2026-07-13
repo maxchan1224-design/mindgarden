@@ -51,12 +51,17 @@ export default function Settings({ profile, onSwitch }: { profile: Profile; onSw
       <p className="muted" style={{ margin: '18px 0 8px' }}>陪你嘅人</p>
       {(Object.keys(PERSONA_META) as PersonaId[]).map(pid => (
         <button key={pid} className="card" onClick={() => update({ personaId: pid })}
-          style={{ width: '100%', textAlign: 'left', marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: profile.personaId === pid ? '1.5px solid var(--sage)' : '1.5px solid transparent' }}>
-          <span>
-            <span className="serif" style={{ fontSize: 16 }}>{PERSONA_META[pid].name}</span>
-            <span className="muted" style={{ marginLeft: 10 }}>{PERSONA_META[pid].tagline}</span>
+          style={{ width: '100%', textAlign: 'left', marginBottom: 10, border: profile.personaId === pid ? '1.5px solid var(--sage)' : '1.5px solid transparent' }}>
+          <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>
+              <span className="serif" style={{ fontSize: 16 }}>{PERSONA_META[pid].name}</span>
+              <span className="muted" style={{ marginLeft: 10, fontSize: 13 }}>{PERSONA_META[pid].tagline}</span>
+            </span>
+            {profile.personaId === pid && <span style={{ color: 'var(--sage)' }}>✓</span>}
           </span>
-          {profile.personaId === pid && <span style={{ color: 'var(--sage)' }}>✓</span>}
+          <span className="muted" style={{ display: 'block', marginTop: 8, fontSize: 12.5, lineHeight: 1.75 }}>
+            {PERSONA_META[pid].bio}
+          </span>
         </button>
       ))}
 

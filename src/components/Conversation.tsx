@@ -108,8 +108,10 @@ export default function Conversation({
         />
       )}
 
-      {/* 對話歷史(除咗最新一則 AI 回應) */}
-      {dialogue.slice(0, -1).map((t, i) => (
+      {/* 對話歷史。
+          slice(1, -1):跳過第一個 user turn(parent component 已經顯示咗,
+          再 render 一次就會重複),同埋跳過最新一則 AI 回應(下面單獨 render)。 */}
+      {dialogue.slice(1, -1).map((t, i) => (
         t.role === 'user' ? (
           <div key={i} className="card" style={{ marginTop: 12 }}>
             <p style={{ fontSize: 14, lineHeight: 1.7 }}>{t.text}</p>
