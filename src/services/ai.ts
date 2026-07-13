@@ -1,5 +1,5 @@
 import { db } from '../db';
-import type { Entry, PersonaId, DialogueTurn, ChatMode } from '../domain';
+import type { Entry, PersonaId, DialogueTurn, ChatMode, StyleId, Profile } from '../domain';
 
 export interface AiReply { text: string; longText?: string; safety: boolean; offerSummary?: boolean; }
 
@@ -18,8 +18,8 @@ export async function buildMemory(profileId: string): Promise<string> {
 }
 
 interface RequestBody {
-  task: 'checkin' | 'dialogue' | 'summary';
-  ctx: { name: string; personaId: PersonaId; isFirstResponseToday: boolean; voiceMode: boolean; chatMode: ChatMode };
+  task: 'checkin' | 'dialogue' | 'summary' | 'notice';
+  ctx: { name: string; personaId: PersonaId; styleId?: StyleId; isFirstResponseToday: boolean; voiceMode: boolean; chatMode: ChatMode };
   memory: string;
   topic?: string;
   payload: {
@@ -55,4 +55,28 @@ export async function askAi(body: RequestBody): Promise<AiReply> {
   } catch (e: any) {
     return errorReply(e?.message ?? String(e));
   }
+}
+
+
+// v0.2 Notice:攞最近 14 日記錄,叫 AI 幫用戶「留意」— 唔係傾偈
+export async function askNotice(profile: Profile): Promise<string> {
+  const since = Date.now() - 14 * 86400_000;
+  const recent = await db.entries
+    .where('[profileId+createdAt]').between([profile.id, since], [profile.id, Infinity])
+    .toArray();
+  if (recent.length < 3) return '暫時記錄唔夠,再寫多幾日,我先睇到啲嘢。';
+  const lines = recent.map((e: Entry) => {
+    const ems = e.emotions.map(x => `${x.name}${x.intensity}`).join('/');
+    return `${e.dateKey} ${e.type}${ems ? ` [${ems}]` : ''}${e.season ? ` <${e.season}>` : ''} ${e.text.slice(0, 80)}`;
+  });
+  const res = await askAi({
+    task: 'notice',
+    ctx: {
+      name: profile.name, personaId: profile.personaId, styleId: profile.styleId ?? 'quiet',
+      isFirstResponseToday: false, voiceMode: false, chatMode: profile.chatMode ?? 'companion',
+    },
+    memory: lines.join('\n'),
+    payload: {},
+  });
+  return res.text;
 }

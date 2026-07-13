@@ -6,8 +6,8 @@
 // 唔使跨境連第三方,完全冇呢個地區限制,亦唔使另外攞/管理 API key。
 
 import {
-  composeSystemPrompt, checkinTask, dialogueTask, summaryTask,
-  type PromptContext, type PersonaId,
+  composeSystemPrompt, checkinTask, dialogueTask, summaryTask, noticeTask,
+  type PromptContext, type PersonaId, type StyleId,
 } from './functions/lib/prompts';
 
 // 精簡版 Ai binding 型別(唔依賴 @cloudflare/workers-types,keep build 自足)
@@ -21,8 +21,8 @@ export interface Env {
 }
 
 interface Body {
-  task: 'checkin' | 'dialogue' | 'summary';
-  ctx: { name: string; personaId: PersonaId; isFirstResponseToday: boolean; voiceMode: boolean; chatMode: 'companion' | 'open' };
+  task: 'checkin' | 'dialogue' | 'summary' | 'notice';
+  ctx: { name: string; personaId: PersonaId; styleId?: StyleId; isFirstResponseToday: boolean; voiceMode: boolean; chatMode: 'companion' | 'open' };
   memory: string;
   topic?: string;
   payload: {
@@ -48,6 +48,10 @@ async function handleRespond(request: Request, env: Env): Promise<Response> {
     const history = body.payload.history ?? [];
     if (body.task === 'checkin') {
       task = checkinTask({ emotions: body.payload.emotions, text: body.payload.text ?? '' });
+    } else if (body.task === 'notice') {
+      // Notice 用 memory 做原材料;payload.text 唔使有
+      task = noticeTask(body.memory || '(冇記錄)');
+      body.memory = ''; // 唔好重複注入
     } else if (body.task === 'summary') {
       task = summaryTask();
     } else {

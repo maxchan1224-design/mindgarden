@@ -1,9 +1,10 @@
 import Dexie, { type Table } from 'dexie';
-import type { Entry, Profile } from './domain';
+import type { Entry, Profile, Seed } from './domain';
 
 class MindGardenDB extends Dexie {
   entries!: Table<Entry, string>;
   profiles!: Table<Profile, string>;
+  seeds!: Table<Seed, string>;
   constructor() {
     super('mind-garden');
     this.version(1).stores({
@@ -17,6 +18,16 @@ class MindGardenDB extends Dexie {
     }).upgrade(tx =>
       tx.table('profiles').toCollection().modify(p => {
         if (!p.chatMode) p.chatMode = 'companion';
+      }),
+    );
+    // v3: Awareness Companion 重新設計 — seeds table + 預設對話風格
+    this.version(3).stores({
+      entries: 'id, profileId, type, createdAt, dateKey, [profileId+dateKey], [profileId+createdAt]',
+      profiles: 'id, createdAt',
+      seeds: 'id, profileId, createdAt',
+    }).upgrade(tx =>
+      tx.table('profiles').toCollection().modify(p => {
+        if (!p.styleId) p.styleId = 'quiet';
       }),
     );
   }

@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { db } from '../db';
-import { EMOTIONS, todayKey, uid, type Emotion, type Profile } from '../domain';
+import { EMOTIONS, todayKey, uid, type Emotion, type Profile, type StyleId } from '../domain';
 import Conversation from './Conversation';
 
-export default function CheckIn({ profile, onDone }: { profile: Profile; onDone: () => void }) {
+export default function CheckIn({ profile, initialStyle, onDone }: { profile: Profile; initialStyle?: StyleId; onDone: () => void }) {
   const [picked, setPicked] = useState<Emotion[]>([]);
   const [intensity, setIntensity] = useState(5);
   const [text, setText] = useState('');
@@ -63,6 +63,7 @@ export default function CheckIn({ profile, onDone }: { profile: Profile; onDone:
           </div>
           <Conversation
             profile={profile}
+            initialStyle={initialStyle}
             entryId={entryId}
             initialText={submitted.text || `我而家覺得${submitted.emotions.map(e => e.name).join('、')}`}
             emotions={submitted.emotions}

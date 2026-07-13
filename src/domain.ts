@@ -1,4 +1,4 @@
-export type EntryType = 'checkin' | 'gratitude' | 'thought' | 'dialogue' | 'body';
+export type EntryType = 'checkin' | 'gratitude' | 'thought' | 'dialogue' | 'body' | 'capsule';
 export type PersonaId = 'aqing' | 'hiulaam' | 'siuching';
 export type ResponseMode = 'ask' | 'voice' | 'text';
 export type ChatMode = 'companion' | 'open';
@@ -19,6 +19,9 @@ export interface Entry {
   dialogue: DialogueTurn[];  // AI 回應同後續對話存喺 entry 入面
   topic?: string;            // 自我對話:主題
   bodyParts?: { part: string; feeling: string }[];
+  season?: SeasonId;         // v0.2 今晚嘅季節
+  garden?: GardenId;         // v0.2 花園分類(本地分類結果)
+  openAt?: number;           // v0.2 時間囊:呢個時間之前唔開得
 }
 
 export interface Profile {
@@ -27,6 +30,7 @@ export interface Profile {
   personaId: PersonaId;
   responseMode: ResponseMode;
   chatMode: ChatMode;      // companion = 溫柔陪伴 / open = 自由對話
+  styleId?: StyleId;       // v0.2 預設對話風格(取代以 persona 做重心)
   voiceLang: VoiceLang;    // yue = 粵語 / cmn = 普通話 / en = 英文
   createdAt: number;
 }
@@ -149,3 +153,89 @@ export const DIALOGUE_TOPICS: Topic[] = [
 export const BODY_PARTS = ['頭', '頸', '肩膀', '胸口', '胃', '背', '手', '腳'];
 export const BODY_FEELINGS = ['繃緊', '沉重', '放鬆', '痛', '暖', '凍', '麻', '有活力', '攰', '輕盈'];
 
+
+// =====================================================================
+// v0.2 — Awareness Companion 重新設計
+// =====================================================================
+
+// ---- 今晚你需要啲咩(取代「今天心情如何」) ----
+export type NeedId = 'slow' | 'clear' | 'listen' | 'clarity';
+export interface Need {
+  id: NeedId; emoji: string; title: string; sub: string;
+  practice: 'body' | 'dialogue' | 'checkin';
+  style: StyleId;
+}
+export const NEEDS: Need[] = [
+  { id: 'slow',    emoji: '🌿', title: '我想慢落嚟',       sub: '今日太攰',       practice: 'body',     style: 'quiet' },
+  { id: 'clear',   emoji: '💭', title: '我想清一清個腦',   sub: '今日好多諗法',   practice: 'dialogue', style: 'reflect' },
+  { id: 'listen',  emoji: '❤️', title: '我想有人聽下',     sub: '今日淨係想講',   practice: 'checkin',  style: 'quiet' },
+  { id: 'clarity', emoji: '🧭', title: '我想諗清楚一件事', sub: '今日有嘢想諗通', practice: 'dialogue', style: 'strategic' },
+];
+
+// ---- 對話風格(取代 persona 人物) ----
+export type StyleId = 'quiet' | 'reflect' | 'strategic' | 'deep' | 'brainstorm' | 'encourage';
+export const STYLES: Record<StyleId, { emoji: string; name: string; desc: string }> = {
+  quiet:      { emoji: '🌿', name: '安靜陪伴', desc: '多聽少問,溫柔,唔急' },
+  reflect:    { emoji: '🪞', name: '反思',     desc: '用問題幫你理解自己' },
+  strategic:  { emoji: '🧠', name: '理性思考', desc: '工作、財務、決定、解難' },
+  deep:       { emoji: '🌊', name: '深度對話', desc: '人生、意義、價值' },
+  brainstorm: { emoji: '⚡', name: '腦震盪',   desc: '天馬行空,一齊諗計' },
+  encourage:  { emoji: '☀️', name: '鼓勵',     desc: '溫柔支持,慶祝進步' },
+};
+
+// ---- 季節(取代 開心/唔開心 嘅框架) ----
+export type SeasonId = 'spring' | 'summer' | 'autumn' | 'winter';
+export const SEASONS: Record<SeasonId, { emoji: string; name: string; desc: string }> = {
+  spring: { emoji: '🌱', name: '春', desc: '有啲嘢喺度開始' },
+  summer: { emoji: '☀️', name: '夏', desc: '有能量,喺度行緊' },
+  autumn: { emoji: '🍂', name: '秋', desc: '喺度沉澱、放低' },
+  winter: { emoji: '❄️', name: '冬', desc: '靜落嚟,養住自己' },
+};
+// 冬天唔係壞事 — 呢個係成個設計嘅重點,唔好將季節 map 落好/壞。
+
+// ---- 花園分類(唔係 folder,係一個花園) ----
+export type GardenId = 'gratitude' | 'learning' | 'career' | 'relationships' | 'memories' | 'lettingGo' | 'dreams';
+export const GARDEN: Record<GardenId, { emoji: string; name: string }> = {
+  gratitude:     { emoji: '🌸', name: '感恩' },
+  learning:      { emoji: '🌿', name: '學習' },
+  career:        { emoji: '🌻', name: '工作' },
+  relationships: { emoji: '🌳', name: '關係' },
+  memories:      { emoji: '🌹', name: '回憶' },
+  lettingGo:     { emoji: '🍃', name: '放低' },
+  dreams:        { emoji: '🌼', name: '夢想' },
+};
+
+// 本地關鍵詞分類(即時、離線;AI notice 係另一層)
+const GARDEN_KEYWORDS: [GardenId, RegExp][] = [
+  ['career',        /返工|同事|老細|上司|公司|工作|辭職|轉工|開會|OT|加班|人工/],
+  ['relationships', /朋友|屋企|媽|爸|阿哥|家姐|細佬|妹|男朋友|女朋友|伴侶|老公|老婆|拍拖|關係|同學/],
+  ['learning',      /學識|學咗|上堂|課程|讀書|睇書|練習|進步|學緊/],
+  ['lettingGo',     /放低|放手|算啦|釋懷|唔再|放得低|原諒|接受咗/],
+  ['dreams',        /夢想|想做|將來|未來|目標|希望有日|如果可以/],
+  ['memories',      /記得|回憶|嗰時|細個|以前|舊時|懷念/],
+];
+export function classifyGarden(text: string, type: EntryType): GardenId | null {
+  if (type === 'gratitude') return 'gratitude';
+  for (const [id, re] of GARDEN_KEYWORDS) if (re.test(text)) return id;
+  return null;
+}
+
+// ---- Seeds:一句重要嘅說話,慢慢生長 ----
+export interface Seed {
+  id: string;
+  profileId: string;
+  text: string;
+  createdAt: number;
+  dateKey: string;
+}
+export function seedStage(createdAt: number): { emoji: string; label: string } {
+  const days = (Date.now() - createdAt) / 86400_000;
+  if (days < 7) return { emoji: '🌱', label: '啱啱種低' };
+  if (days < 30) return { emoji: '🌿', label: '生緊根' };
+  return { emoji: '🌳', label: '已經係你一部分' };
+}
+
+// ---- Silence:每星期一日,唔使寫 ----
+export function isSilenceDay(d = new Date()): boolean {
+  return d.getDay() === 0; // 星期日
+}

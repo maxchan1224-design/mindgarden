@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, setActiveProfileId } from '../db';
-import { PERSONA_META, uid, type ChatMode, type PersonaId, type Profile, type ResponseMode, type VoiceLang } from '../domain';
+import { PERSONA_META, STYLES, uid, type ChatMode, type PersonaId, type Profile, type ResponseMode, type StyleId, type VoiceLang } from '../domain';
 import { hasEnhancedVoice, speakSample, VOICE_LANG_LABELS } from '../services/tts';
 
 const CHAT_MODES: { id: ChatMode; label: string; desc: string }[] = [
@@ -48,22 +48,26 @@ export default function Settings({ profile, onSwitch }: { profile: Profile; onSw
           value={profile.name} onChange={e => update({ name: e.target.value })} />
       </div>
 
-      <p className="muted" style={{ margin: '18px 0 8px' }}>陪你嘅人</p>
-      {(Object.keys(PERSONA_META) as PersonaId[]).map(pid => (
-        <button key={pid} className="card" onClick={() => update({ personaId: pid })}
-          style={{ width: '100%', textAlign: 'left', marginBottom: 10, border: profile.personaId === pid ? '1.5px solid var(--sage)' : '1.5px solid transparent' }}>
-          <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span>
-              <span className="serif" style={{ fontSize: 16 }}>{PERSONA_META[pid].name}</span>
-              <span className="muted" style={{ marginLeft: 10, fontSize: 13 }}>{PERSONA_META[pid].tagline}</span>
-            </span>
-            {profile.personaId === pid && <span style={{ color: 'var(--sage)' }}>✓</span>}
-          </span>
-          <span className="muted" style={{ display: 'block', marginTop: 8, fontSize: 12.5, lineHeight: 1.75 }}>
-            {PERSONA_META[pid].bio}
-          </span>
-        </button>
-      ))}
+      <p className="muted" style={{ margin: '18px 0 8px' }}>預設傾偈方式 · 對話途中隨時轉得</p>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+        {(Object.keys(STYLES) as StyleId[]).map(sid => (
+          <button key={sid} className="card" onClick={() => update({ styleId: sid })}
+            style={{ textAlign: 'left', padding: '12px 14px', border: (profile.styleId ?? 'quiet') === sid ? '1.5px solid var(--sage)' : '1.5px solid transparent' }}>
+            <span style={{ fontSize: 14, fontWeight: 500 }}>{STYLES[sid].emoji} {STYLES[sid].name}</span>
+            <span className="muted" style={{ display: 'block', marginTop: 3, fontSize: 11 }}>{STYLES[sid].desc}</span>
+          </button>
+        ))}
+      </div>
+
+      <p className="muted" style={{ margin: '18px 0 8px' }}>聲線 · 只影響語音把聲</p>
+      <div style={{ display: 'flex', gap: 8 }}>
+        {(Object.keys(PERSONA_META) as PersonaId[]).map(pid => (
+          <button key={pid} className={`chip ${profile.personaId === pid ? 'on' : ''}`} style={{ flex: 1, textAlign: 'center' }}
+            onClick={() => update({ personaId: pid })}>
+            {PERSONA_META[pid].name}
+          </button>
+        ))}
+      </div>
 
       <p className="muted" style={{ margin: '18px 0 8px' }}>對話模式</p>
       {CHAT_MODES.map(m => (

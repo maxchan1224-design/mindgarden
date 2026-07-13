@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { db, isFirstResponseToday, markGreeted } from '../db';
-import { PERSONA_META, todayKey, type DialogueTurn, type Profile, type VoiceLang } from '../domain';
+import { STYLES, todayKey, type DialogueTurn, type Profile, type StyleId } from '../domain';
 import { askAi, buildMemory } from '../services/ai';
 import { speak, stopSpeaking } from '../services/tts';
 import CallScreen from './CallScreen';
@@ -11,15 +11,19 @@ type Phase = 'thinking' | 'ringing' | 'reply';
 // 只有第一則 AI 回應先有可能出現來電卡(ask 模式)或者自動語音(voice 模式)。
 // 之後嘅 follow-up 一律淨係文字,唔會再彈電話 / 再自動讀聲 —— 想聽先撳「播放」。
 export default function Conversation({
-  profile, entryId, initialText, emotions, topic, onDone,
+  profile, entryId, initialText, emotions, topic, initialStyle, onDone,
 }: {
   profile: Profile;
   entryId: string;
   initialText: string;
   emotions?: { name: string; intensity: number }[];
   topic?: string;
+  initialStyle?: StyleId;   // v0.2 由「今晚你需要啲咩」帶入嘅風格
   onDone: () => void;
 }) {
+  // v0.2 對話風格 — 唔係人物,係傾偈方式,中途可以隨時轉
+  const [style, setStyle] = useState<StyleId>(initialStyle ?? profile.styleId ?? 'quiet');
+  const [showStyles, setShowStyles] = useState(false);
   const [phase, setPhase] = useState<Phase>('thinking');
   const [dialogue, setDialogue] = useState<DialogueTurn[]>([]);
   const [longText, setLongText] = useState<string | undefined>();
@@ -38,6 +42,7 @@ export default function Conversation({
       ctx: {
         name: profile.name,
         personaId: profile.personaId,
+        styleId: style,
         isFirstResponseToday: first,
         voiceMode,
         chatMode: profile.chatMode ?? 'companion',
@@ -95,7 +100,7 @@ export default function Conversation({
     setPhase('reply'); // follow-up 一律淨文字,唔自動讀聲
   }
 
-  const persona = PERSONA_META[profile.personaId];
+  const styleMeta = STYLES[style];
   const latestAi = dialogue.filter(t => t.role === 'ai').slice(-1)[0];
 
   return (
@@ -118,7 +123,7 @@ export default function Conversation({
           </div>
         ) : (
           <div key={i} className="ai-card" style={{ marginTop: 12, opacity: 0.6 }}>
-            <p className="who">{persona.name}</p>
+            <p className="who">{styleMeta.emoji} {styleMeta.name}</p>
             <p className="say" style={{ fontSize: 14 }}>{t.text}</p>
           </div>
         )
@@ -127,14 +132,14 @@ export default function Conversation({
       {phase === 'thinking' && (
         <div className="typing-row">
           <span className="typing-dots"><i /><i /><i /></span>
-          <p className="muted">{persona.name}打緊字</p>
+          <p className="muted">打緊字</p>
         </div>
       )}
 
       {phase === 'reply' && latestAi && (
         <>
           <div className="ai-card" style={{ marginTop: 14 }}>
-            <p className="who">{persona.name}</p>
+            <p className="who">{styleMeta.emoji} {styleMeta.name}</p>
             <p className="say" style={{ whiteSpace: 'pre-wrap' }}>{longText || latestAi.text}</p>
             {profile.responseMode !== 'text' && (
               <button
@@ -157,7 +162,22 @@ export default function Conversation({
             </div>
           )}
 
-          <textarea className="entry" style={{ marginTop: 16, minHeight: 70 }}
+          <div style={{ marginTop: 16 }}>
+            <button className="chip" style={{ fontSize: 12 }} onClick={() => setShowStyles(v => !v)}>
+              {styleMeta.emoji} {styleMeta.name} ▾
+            </button>
+            {showStyles && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+                {(Object.keys(STYLES) as StyleId[]).map(sid => (
+                  <button key={sid} className={`chip ${sid === style ? 'on' : ''}`} style={{ fontSize: 12 }}
+                    onClick={() => { setStyle(sid); setShowStyles(false); }}>
+                    {STYLES[sid].emoji} {STYLES[sid].name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <textarea className="entry" style={{ marginTop: 10, minHeight: 70 }}
             placeholder="想講咩就講…"
             value={followUp} onChange={e => setFollowUp(e.target.value)} />
           <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>

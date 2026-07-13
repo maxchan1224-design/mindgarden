@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { db } from '../db';
-import { todayKey, uid, type Profile } from '../domain';
+import { todayKey, uid, type Profile, type StyleId } from '../domain';
 import Conversation from './Conversation';
 
-export default function Dialogue({ profile, onDone }: { profile: Profile; onDone: () => void }) {
+export default function Dialogue({ profile, initialStyle, onDone }: { profile: Profile; initialStyle?: StyleId; onDone: () => void }) {
   const [text, setText] = useState('');
   const [entryId, setEntryId] = useState('');
   const [submitted, setSubmitted] = useState<string | null>(null);
@@ -36,7 +36,7 @@ export default function Dialogue({ profile, onDone }: { profile: Profile; onDone
           <div className="card" style={{ marginTop: 12 }}>
             <p style={{ fontSize: 14, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{submitted}</p>
           </div>
-          <Conversation profile={profile} entryId={entryId} initialText={submitted} onDone={onDone} />
+          <Conversation profile={profile} initialStyle={initialStyle} entryId={entryId} initialText={submitted} onDone={onDone} />
         </>
       )}
     </div>
