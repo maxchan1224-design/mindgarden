@@ -32,8 +32,8 @@ interface Body {
   };
 }
 
-// Qwen1.5 對中文/廣東話書面語支援穩定,喺 Cloudflare 平台內行,唔受地區封鎖影響
-const MODEL = '@cf/qwen/qwen1.5-14b-chat-awq';
+// Qwen1.5 已於 2025-10-01 被 Cloudflare 下架,改用現行嘅 Qwen3(MoE,快、中文能力更強)
+const MODEL = '@cf/qwen/qwen3-30b-a3b-fp8';
 
 async function handleRespond(request: Request, env: Env): Promise<Response> {
   try {
@@ -74,7 +74,7 @@ async function handleRespond(request: Request, env: Env): Promise<Response> {
       return json({ text: `(AI 暫時連唔到:${aiErr?.message ?? 'unknown'})`, safety: false });
     }
 
-    const clean = raw.replace(/```json|```/g, '').trim();
+    const clean = raw.replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/```json|```/g, '').trim();
     let parsed: any;
     try { parsed = JSON.parse(clean); } catch { parsed = { text: clean, safety: false }; }
     if (typeof parsed.text !== 'string' || !parsed.text.trim()) parsed = { text: clean || '聽到喇,你想講多啲咩?', safety: false };
