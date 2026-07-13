@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { db, isFirstResponseToday, markGreeted } from '../db';
-import { PERSONA_META, todayKey, type DialogueTurn, type Profile } from '../domain';
+import { PERSONA_META, todayKey, type DialogueTurn, type Profile, type VoiceLang } from '../domain';
 import { askAi, buildMemory } from '../services/ai';
 import { speak, stopSpeaking } from '../services/tts';
 import CallScreen from './CallScreen';
@@ -52,7 +52,7 @@ export default function Conversation({
 
   function playVoice(text: string) {
     setSpeaking(true);
-    speak(text, profile.personaId, () => setSpeaking(false));
+    speak(text, profile.personaId, profile.voiceLang ?? 'yue', () => setSpeaking(false));
   }
 
   // 第一次 AI 回應
