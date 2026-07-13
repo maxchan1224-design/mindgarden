@@ -32,11 +32,9 @@ interface Body {
   };
 }
 
-// GLM-4.7-Flash(智譜 AI)— 中國公司出品,中文係佢嘅原生能力,唔似歐美 model 要「翻譯」出中文。
-// 之前用 Mistral 24B:英文/歐洲語言強,但寫粵語會砌出唔通順嘅四不像。
-// 之前用 Qwen3-30B-A3B:粵語通順但 MoE 只激活 3B,內容敷衍。
-// GLM 兩者兼顧:原生中文 + 足夠嘅有效參數。131K context。
-const MODEL = '@cf/zhipuai/glm-4.7-flash';
+// GLM-4.7-Flash(智譜 AI / Z.ai)— 中國公司出品,中文係佢嘅原生能力,唔似歐美 model 要「翻譯」出中文。
+// 正確 model ID 命名空間係 @cf/zai-org/(唔係 @cf/zhipuai/— 呢個係之前試錯嘅位)。
+const MODEL = '@cf/zai-org/glm-4.7-flash';
 
 async function handleRespond(request: Request, env: Env): Promise<Response> {
   try {
