@@ -32,13 +32,10 @@ interface Body {
   };
 }
 
-// Gemma 3 12B(Google)— 非 reasoning model,冇隱藏思考階段。
-// 之前試過嘅 Qwen3-30B-A3B 同 GLM-4.7-Flash 都係 reasoning-locked MoE,
-// thinking 焼死喺 model 訓練入面,官方冇公開任何參數可以完全關閉,
-// 所以會不斷「諗到爆晒 token」→ content 變 null → 前端見到錯誤或者好慢。
-// Gemma 3 係一般 instruct model,答案直出,速度穩定,唔會有呢種病。
-// 128K context,多語言支援。中文/粵語未必及 GLM 咁地道,但快、穩、唔會斷。
-const MODEL = '@cf/google/gemma-3-12b-it';
+// Llama 3.1 8B Instruct(Meta)— 非 reasoning model,亦唔屬於 Cloudflare 嘅「private model」
+// 分類(唔似 Gemma 3 12B 會撞 error 5018 要帳戶額外批核先用到)。
+// 開箱即用、速度快、免費層通用。中文/粵語未必及 GLM 咁地道,但穩定性優先。
+const MODEL = '@cf/meta/llama-3.1-8b-instruct';
 
 async function handleRespond(request: Request, env: Env): Promise<Response> {
   try {
