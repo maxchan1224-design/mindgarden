@@ -32,10 +32,10 @@ interface Body {
   };
 }
 
-// Llama 3.1 8B Instruct(Meta)— 非 reasoning model,亦唔屬於 Cloudflare 嘅「private model」
-// 分類(唔似 Gemma 3 12B 會撞 error 5018 要帳戶額外批核先用到)。
-// 開箱即用、速度快、免費層通用。中文/粵語未必及 GLM 咁地道,但穩定性優先。
-const MODEL = '@cf/meta/llama-3.1-8b-instruct';
+// Llama 3.1 8B Instruct(Fast 版)— 官方目錄確認現行未下架嘅版本
+// (原本嘅 @cf/meta/llama-3.1-8b-instruct 喺 2026-05-30 被下架,-fast 係接替版本)。
+// 非 reasoning model,亦唔屬於 private model 分類,唔會撞 5016/5018。
+const MODEL = '@cf/meta/llama-3.1-8b-instruct-fast';
 
 async function handleRespond(request: Request, env: Env): Promise<Response> {
   try {
