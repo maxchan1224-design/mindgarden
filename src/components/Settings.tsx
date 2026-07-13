@@ -1,138 +1,191 @@
 import { useState } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db, setActiveProfileId } from '../db';
-import { PERSONA_META, STYLES, uid, type ChatMode, type PersonaId, type Profile, type ResponseMode, type StyleId, type VoiceLang } from '../domain';
-import { hasEnhancedVoice, speakSample, VOICE_LANG_LABELS } from '../services/tts';
+import { db, isFirstResponseToday, markGreeted } from '../db';
+import { STYLES, todayKey, type DialogueTurn, type Profile, type StyleId } from '../domain';
+import { askAi, buildMemory } from '../services/ai';
+import { speak, stopSpeaking } from '../services/tts';
+import CallScreen from './CallScreen';
 
-const CHAT_MODES: { id: ChatMode; label: string; desc: string }[] = [
-  { id: 'companion', label: '溫柔陪伴', desc: '先聽你講,慢慢嚟。需要分析嗰陣一樣會分析' },
-  { id: 'open', label: '自由對話', desc: '似同朋友傾偈,你問咩佢答咩,可長可短' },
-];
+type Phase = 'thinking' | 'ringing' | 'reply';
 
-const MODES: { id: ResponseMode; label: string; desc: string }[] = [
-  { id: 'ask', label: '每次問我', desc: '以來電形式問你想聽定想睇' },
-  { id: 'voice', label: '直接語音', desc: '寫完直接播聲' },
-  { id: 'text', label: '純文字', desc: '安靜模式,只顯示文字' },
-];
+// 所有功能共用嘅對話引擎。
+// 只有第一則 AI 回應先有可能出現來電卡(ask 模式)或者自動語音(voice 模式)。
+// 之後嘅 follow-up 一律淨係文字,唔會再彈電話 / 再自動讀聲 —— 想聽先撳「播放」。
+export default function Conversation({
+  profile, entryId, initialText, emotions, topic, initialStyle, onDone,
+}: {
+  profile: Profile;
+  entryId: string;
+  initialText: string;
+  emotions?: { name: string; intensity: number }[];
+  topic?: string;
+  initialStyle?: StyleId;   // v0.2 由「今晚你需要啲咩」帶入嘅風格
+  onDone: () => void;
+}) {
+  // v0.2 對話風格 — 唔係人物,係傾偈方式,中途可以隨時轉
+  const [style, setStyle] = useState<StyleId>(initialStyle ?? profile.styleId ?? 'quiet');
+  const [showStyles, setShowStyles] = useState(false);
+  const [phase, setPhase] = useState<Phase>('thinking');
+  const [dialogue, setDialogue] = useState<DialogueTurn[]>([]);
+  const [longText, setLongText] = useState<string | undefined>();
+  const [followUp, setFollowUp] = useState('');
+  const [safety, setSafety] = useState(false);
+  const [started, setStarted] = useState(false);
+  const [isFirstReply, setIsFirstReply] = useState(true);
+  const [speaking, setSpeaking] = useState(false);
 
-export default function Settings({ profile, onSwitch }: { profile: Profile; onSwitch: () => void }) {
-  const profiles = useLiveQuery(() => db.profiles.orderBy('createdAt').toArray(), []) ?? [];
-  const [newName, setNewName] = useState('');
-
-  const update = (patch: Partial<Profile>) => db.profiles.update(profile.id, patch);
-
-  async function addProfile() {
-    const name = newName.trim();
-    if (!name) return;
-    const p: Profile = { id: uid(), name, personaId: 'aqing', responseMode: 'ask', chatMode: 'companion', voiceLang: 'yue', createdAt: Date.now() };
-    await db.profiles.add(p);
-    setNewName('');
+  async function call(history: DialogueTurn[], task: 'checkin' | 'dialogue') {
+    const first = isFirstResponseToday(profile.id, todayKey());
+    const memory = await buildMemory(profile.id);
+    const voiceMode = profile.responseMode !== 'text';
+    const res = await askAi({
+      task,
+      ctx: {
+        name: profile.name,
+        personaId: profile.personaId,
+        styleId: style,
+        isFirstResponseToday: first,
+        voiceMode,
+        chatMode: profile.chatMode ?? 'companion',
+      },
+      memory,
+      topic,
+      payload: task === 'checkin' ? { emotions, text: initialText } : { history },
+    });
+    markGreeted(profile.id, todayKey());
+    return res;
   }
 
-  async function exportJson() {
-    const entries = await db.entries.where('profileId').equals(profile.id).toArray();
-    const blob = new Blob([JSON.stringify({ profile, entries }, null, 2)], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `mind-garden-${profile.name}.json`;
-    a.click();
+  function playVoice(text: string) {
+    setSpeaking(true);
+    speak(text, profile.personaId, profile.voiceLang ?? 'yue', () => setSpeaking(false));
   }
+
+  // 第一次 AI 回應
+  if (!started) {
+    setStarted(true);
+    (async () => {
+      const userTurn: DialogueTurn = { role: 'user', text: initialText };
+      const res = await call([userTurn], 'checkin');
+      const dlg = [userTurn, { role: 'ai' as const, text: res.text }];
+      setDialogue(dlg);
+      setLongText(res.longText);
+      setSafety(res.safety);
+      await db.entries.update(entryId, { dialogue: dlg });
+
+      if (res.safety || profile.responseMode === 'text') {
+        setPhase('reply');
+      } else if (profile.responseMode === 'voice') {
+        setPhase('reply');
+        playVoice(res.text); // 文字即刻顯示,聲音同步播
+      } else {
+        setPhase('ringing');
+      }
+    })();
+  }
+
+  async function sendFollowUp() {
+    if (!followUp.trim()) return;
+    const userTurn: DialogueTurn = { role: 'user', text: followUp.trim() };
+    const next = [...dialogue, userTurn];
+    setDialogue(next);
+    setFollowUp('');
+    setIsFirstReply(false);
+    setPhase('thinking');
+    const res = await call(next, 'dialogue');
+    const dlg = [...next, { role: 'ai' as const, text: res.text }];
+    setDialogue(dlg);
+    setLongText(res.longText);
+    setSafety(res.safety);
+    await db.entries.update(entryId, { dialogue: dlg });
+    setPhase('reply'); // follow-up 一律淨文字,唔自動讀聲
+  }
+
+  const styleMeta = STYLES[style];
+  const latestAi = dialogue.filter(t => t.role === 'ai').slice(-1)[0];
 
   return (
-    <div className="page">
-      <h1 className="serif" style={{ fontSize: 22 }}>設定</h1>
+    <>
+      {phase === 'ringing' && (
+        <CallScreen
+          personaId={profile.personaId}
+          onAccept={() => { setPhase('reply'); playVoice(latestAi?.text ?? ''); }}
+          onDecline={() => setPhase('reply')}
+        />
+      )}
 
-      <p className="muted" style={{ margin: '18px 0 8px' }}>你嘅名</p>
-      <div className="card">
-        <input style={{ border: 'none', background: 'none', width: '100%', outline: 'none' }}
-          value={profile.name} onChange={e => update({ name: e.target.value })} />
-      </div>
-
-      <p className="muted" style={{ margin: '18px 0 8px' }}>預設傾偈方式 · 對話途中隨時轉得</p>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-        {(Object.keys(STYLES) as StyleId[]).map(sid => (
-          <button key={sid} className="card" onClick={() => update({ styleId: sid })}
-            style={{ textAlign: 'left', padding: '12px 14px', border: (profile.styleId ?? 'quiet') === sid ? '1.5px solid var(--sage)' : '1.5px solid transparent' }}>
-            <span style={{ fontSize: 14, fontWeight: 500 }}>{STYLES[sid].emoji} {STYLES[sid].name}</span>
-            <span className="muted" style={{ display: 'block', marginTop: 3, fontSize: 11 }}>{STYLES[sid].desc}</span>
-          </button>
-        ))}
-      </div>
-
-      <p className="muted" style={{ margin: '18px 0 8px' }}>聲線 · 只影響語音把聲</p>
-      <div style={{ display: 'flex', gap: 8 }}>
-        {(Object.keys(PERSONA_META) as PersonaId[]).map(pid => (
-          <button key={pid} className={`chip ${profile.personaId === pid ? 'on' : ''}`} style={{ flex: 1, textAlign: 'center' }}
-            onClick={() => update({ personaId: pid })}>
-            {PERSONA_META[pid].name}
-          </button>
-        ))}
-      </div>
-
-      <p className="muted" style={{ margin: '18px 0 8px' }}>對話模式</p>
-      {CHAT_MODES.map(m => (
-        <button key={m.id} className="card" onClick={() => update({ chatMode: m.id })}
-          style={{ width: '100%', textAlign: 'left', marginBottom: 8, border: (profile.chatMode ?? 'companion') === m.id ? '1.5px solid var(--sage)' : '1.5px solid transparent' }}>
-          <span style={{ fontSize: 15, fontWeight: 500 }}>{m.label}</span>
-          <span className="muted" style={{ display: 'block', marginTop: 2, fontSize: 12 }}>{m.desc}</span>
-        </button>
+      {/* 對話歷史。
+          slice(1, -1):跳過第一個 user turn(parent component 已經顯示咗,
+          再 render 一次就會重複),同埋跳過最新一則 AI 回應(下面單獨 render)。 */}
+      {dialogue.slice(1, -1).map((t, i) => (
+        t.role === 'user' ? (
+          <div key={i} className="card" style={{ marginTop: 12 }}>
+            <p style={{ fontSize: 14, lineHeight: 1.7 }}>{t.text}</p>
+          </div>
+        ) : (
+          <div key={i} className="ai-card" style={{ marginTop: 12, opacity: 0.6 }}>
+            <p className="who">{styleMeta.emoji} {styleMeta.name}</p>
+            <p className="say" style={{ fontSize: 14 }}>{t.text}</p>
+          </div>
+        )
       ))}
 
-      <p className="muted" style={{ margin: '18px 0 8px' }}>回應方式</p>
-      {MODES.map(m => (
-        <button key={m.id} className="card" onClick={() => update({ responseMode: m.id })}
-          style={{ width: '100%', textAlign: 'left', marginBottom: 8, border: profile.responseMode === m.id ? '1.5px solid var(--sage)' : '1.5px solid transparent' }}>
-          <span style={{ fontSize: 15, fontWeight: 500 }}>{m.label}</span>
-          <span className="muted" style={{ display: 'block', marginTop: 2, fontSize: 12 }}>{m.desc}</span>
-        </button>
-      ))}
-
-      <p className="muted" style={{ margin: '18px 0 8px' }}>語音語言</p>
-      {(['yue','cmn','en'] as VoiceLang[]).map(lang => (
-        <button key={lang} className="card"
-          onClick={() => update({ voiceLang: lang })}
-          style={{ width:'100%', textAlign:'left', marginBottom:8, display:'flex', justifyContent:'space-between', alignItems:'center', border: (profile.voiceLang ?? 'yue') === lang ? '1.5px solid var(--sage)' : '1.5px solid transparent' }}>
-          <span>
-            <span style={{ fontSize:15, fontWeight:500 }}>{VOICE_LANG_LABELS[lang]}</span>
-            <span className="muted" style={{ marginLeft:10, fontSize:12 }}>
-              { lang === 'yue' ? '廣東話' : lang === 'cmn' ? 'Mandarin Chinese' : 'English' }
-            </span>
-          </span>
-          <button
-            style={{ fontSize:12, color:'var(--dusk-deep)', background:'var(--dusk-bg)', border:'none', borderRadius:999, padding:'5px 12px' }}
-            onClick={e => { e.stopPropagation(); speakSample(lang, profile.personaId); }}>
-            試聽
-          </button>
-        </button>
-      ))}
-
-      {!hasEnhancedVoice() && (
-        <div className="card" style={{ marginTop: 4, background: 'var(--dusk-bg)' }}>
-          <p style={{ fontSize: 12, lineHeight: 1.8, color: 'var(--dusk-deep)' }}>
-            覺得把聲太機械?iPhone 內置咗更自然嘅粵語聲,但要手動下載一次:<br />
-            <b>設定 → 輔助使用 → 朗讀內容 → 語音 → 中文(香港) → 揀「Sinji(增強)」下載</b><br />
-            下載完返嚟呢度,MindGarden 會自動用返把好聲。
-          </p>
+      {phase === 'thinking' && (
+        <div className="typing-row">
+          <span className="typing-dots"><i /><i /><i /></span>
+          <p className="muted">打緊字</p>
         </div>
       )}
 
-      <p className="muted" style={{ margin: '18px 0 8px' }}>空間 · 每個人有自己嘅私人記錄</p>
-      {profiles.map(p => (
-        <button key={p.id} className="card" onClick={() => { setActiveProfileId(p.id); onSwitch(); }}
-          style={{ width: '100%', textAlign: 'left', marginBottom: 8, border: p.id === profile.id ? '1.5px solid var(--sage)' : '1.5px solid transparent' }}>
-          {p.name}{p.id === profile.id && <span className="muted" style={{ marginLeft: 8 }}>而家喺度</span>}
-        </button>
-      ))}
-      <div className="card" style={{ display: 'flex', gap: 10 }}>
-        <input style={{ border: 'none', background: 'none', flex: 1, outline: 'none' }}
-          placeholder="新空間嘅名…" value={newName} onChange={e => setNewName(e.target.value)} />
-        <button style={{ color: 'var(--sage-deep)', fontSize: 14 }} onClick={addProfile}>新增</button>
-      </div>
+      {phase === 'reply' && latestAi && (
+        <>
+          <div className="ai-card" style={{ marginTop: 14 }}>
+            <p className="who">{styleMeta.emoji} {styleMeta.name}</p>
+            <p className="say" style={{ whiteSpace: 'pre-wrap' }}>{longText || latestAi.text}</p>
+            {profile.responseMode !== 'text' && (
+              <button
+                style={{ marginTop: 10, fontSize: 12, color: 'var(--dusk-deep)', display: 'flex', alignItems: 'center', gap: 5 }}
+                onClick={() => speaking ? (stopSpeaking(), setSpeaking(false)) : playVoice(latestAi.text)}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M4 9v6h4l5 5V4L8 9H4z" /></svg>
+                {speaking ? '停止' : '播放語音'}
+              </button>
+            )}
+          </div>
 
-      <button className="btn ghost" style={{ marginTop: 22 }} onClick={exportJson}>匯出我嘅記錄(JSON)</button>
-      <p className="muted" style={{ marginTop: 14, fontSize: 12, lineHeight: 1.7 }}>
-        所有記錄只儲存喺呢部裝置入面。MindGarden 唔係專業心理支援 — 如果你持續好辛苦,請搵信任嘅人或者專業人士傾。
-      </p>
-    </div>
+          {safety && (
+            <div className="card" style={{ marginTop: 14, borderLeft: '3px solid var(--blush)' }}>
+              <p style={{ fontSize: 13, lineHeight: 1.8 }}>
+                如果你而家好辛苦,可以隨時搵人傾:<br />
+                香港撒瑪利亞防止自殺會 2389 2222(24小時)<br />
+                生命熱線 2382 0000(24小時)<br />
+                明愛向晴軒 18288(24小時)
+              </p>
+            </div>
+          )}
+
+          <div style={{ marginTop: 16 }}>
+            <button className="chip" style={{ fontSize: 12 }} onClick={() => setShowStyles(v => !v)}>
+              {styleMeta.emoji} {styleMeta.name} ▾
+            </button>
+            {showStyles && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+                {(Object.keys(STYLES) as StyleId[]).map(sid => (
+                  <button key={sid} className={`chip ${sid === style ? 'on' : ''}`} style={{ fontSize: 12 }}
+                    onClick={() => { setStyle(sid); setShowStyles(false); }}>
+                    {STYLES[sid].emoji} {STYLES[sid].name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <textarea className="entry" style={{ marginTop: 10, minHeight: 70 }}
+            placeholder="想講咩就講…"
+            value={followUp} onChange={e => setFollowUp(e.target.value)} />
+          <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
+            <button className="btn primary" style={{ flex: 1 }} onClick={sendFollowUp}>傾落去</button>
+            <button className="btn ghost" style={{ flex: 1 }} onClick={() => { stopSpeaking(); onDone(); }}>今日到此為止</button>
+          </div>
+        </>
+      )}
+    </>
   );
 }

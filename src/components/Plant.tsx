@@ -1,45 +1,82 @@
-export default function Plant({ stage, watered }: { stage: string; watered: boolean }) {
+import { useLiveQuery } from 'dexie-react-hooks';
+import { db } from '../db';
+import { GARDEN, STYLES, type Entry, type Profile } from '../domain';
+
+const TYPE_LABEL: Record<string, string> = {
+  checkin: '簽到', dialogue: '對話', body: '身體覺察',
+  gratitude: '小確幸', thought: '隨手記', capsule: '時間囊',
+};
+
+// Library:所有人生片段。時間囊未到期會鎖住。
+export default function Library({ profile }: { profile: Profile }) {
+  const entries = useLiveQuery(
+    () => db.entries.where('profileId').equals(profile.id).reverse().sortBy('createdAt'),
+    [profile.id],
+  );
+
+  if (!entries) return <div className="page"><p className="muted">載入緊…</p></div>;
+
+  const byDay = new Map<string, Entry[]>();
+  for (const e of entries) {
+    if (!byDay.has(e.dateKey)) byDay.set(e.dateKey, []);
+    byDay.get(e.dateKey)!.push(e);
+  }
+
+  const styleName = STYLES[profile.styleId ?? 'quiet'].name;
+
   return (
-    <svg width="190" height="180" viewBox="0 0 190 180" role="img" aria-label={`植物 — ${stage}`}>
-      <ellipse cx="95" cy="158" rx="56" ry="13" fill="var(--line)" />
-      <path d="M62 158 Q95 134 128 158 Z" fill="#B99C7E" />
-      {stage === 'seed' && (
-        <ellipse cx="95" cy="148" rx="7" ry="9" fill="#A3845F" />
+    <div className="page">
+      <h1 className="serif" style={{ fontSize: 22 }}>收藏庫</h1>
+      {entries.length === 0 && (
+        <p className="muted" style={{ marginTop: 20 }}>你嘅人生片段會喺呢度慢慢累積。</p>
       )}
-      {stage === 'sprout' && (
-        <g>
-          <path d="M95 148 C95 138 94 130 95 122" stroke="var(--sage)" strokeWidth="3.5" fill="none" strokeLinecap="round" />
-          <path d="M95 130 C86 127 81 119 83 111 C92 114 96 122 95 130 Z" fill="#A8BC9C" />
-          <path d="M95 124 C104 121 109 113 107 105 C98 108 94 116 95 124 Z" fill="var(--sage)" />
-        </g>
-      )}
-      {(stage === 'seedling' || stage === 'young') && (
-        <g>
-          <path d="M95 146 C95 116 93 96 95 74" stroke="var(--sage)" strokeWidth="4" fill="none" strokeLinecap="round" />
-          <path d="M95 114 C74 110 61 95 63 78 C82 82 95 97 95 114 Z" fill="#93A98B" />
-          <path d="M95 96 C116 92 129 77 127 60 C108 64 95 80 95 96 Z" fill="var(--sage)" />
-          <path d="M95 74 C89 61 91 50 97 44 C103 52 101 65 95 74 Z" fill="#A8BC9C" />
-          {stage === 'young' && (
-            <path d="M95 130 C78 128 68 118 68 106 C82 108 92 118 95 130 Z" fill="var(--sage)" />
-          )}
-        </g>
-      )}
-      {(stage === 'bloom' || stage === 'fruit') && (
-        <g>
-          <path d="M95 146 C95 110 92 84 95 58" stroke="#6E8272" strokeWidth="4.5" fill="none" strokeLinecap="round" />
-          <path d="M95 118 C70 114 56 98 58 80 C80 84 94 100 95 118 Z" fill="#93A98B" />
-          <path d="M95 100 C120 96 134 80 132 62 C110 66 96 82 95 100 Z" fill="var(--sage)" />
-          <path d="M95 128 C112 126 122 116 122 104 C108 106 98 116 95 128 Z" fill="#A8BC9C" />
-          <circle cx="95" cy="50" r="9" fill={stage === 'fruit' ? '#D98A5F' : '#E8B8C8'} />
-          <circle cx="82" cy="60" r="6" fill={stage === 'fruit' ? '#D98A5F' : '#EFCAD6'} />
-          <circle cx="109" cy="61" r="6" fill={stage === 'fruit' ? '#D98A5F' : '#EFCAD6'} />
-        </g>
-      )}
-      {watered && stage !== 'seed' && (
-        <circle cx="120" cy="70" r="4" fill="#AFCBE0">
-          <animate attributeName="cy" values="66;72;66" dur="3s" repeatCount="indefinite" />
-        </circle>
-      )}
-    </svg>
+      {[...byDay.entries()].map(([day, list]) => (
+        <div key={day} style={{ marginTop: 22 }}>
+          <p className="muted" style={{ marginBottom: 8 }}>
+            {new Date(day).toLocaleDateString('zh-HK', { month: 'long', day: 'numeric', weekday: 'short' })}
+          </p>
+          {list.map(e => {
+            const locked = e.type === 'capsule' && e.openAt && e.openAt > Date.now();
+            if (locked) {
+              return (
+                <div key={e.id} className="card" style={{ marginBottom: 10, opacity: 0.75 }}>
+                  <p style={{ fontSize: 14 }}>⏳ 一個封住嘅時間囊</p>
+                  <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                    {new Date(e.openAt!).toLocaleDateString('zh-HK', { year: 'numeric', month: 'long', day: 'numeric' })} 先開得
+                  </p>
+                </div>
+              );
+            }
+            return (
+              <div key={e.id} className="card" style={{ marginBottom: 10 }}>
+                <p className="muted" style={{ fontSize: 11, marginBottom: 6 }}>
+                  {TYPE_LABEL[e.type] ?? e.type}
+                  {e.garden && ` · ${GARDEN[e.garden].emoji}${GARDEN[e.garden].name}`}
+                  {e.topic && ` · ${e.topic}`}
+                  {' · '}
+                  {new Date(e.createdAt).toLocaleTimeString('zh-HK', { hour: '2-digit', minute: '2-digit' })}
+                </p>
+                {e.emotions.length > 0 && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 8 }}>
+                    {e.emotions.map(em => (
+                      <span key={em.name} className="chip" style={{ fontSize: 11, padding: '3px 9px' }}>{em.name}</span>
+                    ))}
+                  </div>
+                )}
+                {(e.text || e.type !== 'checkin') && (
+                  <p style={{ fontSize: 14, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{e.text || '(只揀咗季節)'}</p>
+                )}
+                {e.dialogue.filter(t => t.role === 'ai').slice(-1).map((t, i) => (
+                  <div key={i} style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--line)' }}>
+                    <p className="muted" style={{ fontSize: 11, marginBottom: 4 }}>{styleName}</p>
+                    <p className="serif" style={{ fontSize: 13, lineHeight: 1.8, color: 'var(--mist)' }}>{t.text}</p>
+                  </div>
+                ))}
+              </div>
+            );
+          })}
+        </div>
+      ))}
+    </div>
   );
 }

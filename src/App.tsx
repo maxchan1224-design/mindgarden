@@ -1,119 +1,138 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db, getActiveProfileId, setActiveProfileId } from './db';
-import { uid, type Need, type Profile, type StyleId } from './domain';
-import Reflect from './components/Reflect';
-import Capture from './components/Capture';
-import Library from './components/Library';
-import Garden from './components/Garden';
-import CheckIn from './components/CheckIn';
-import Dialogue from './components/Dialogue';
-import Body from './components/Body';
-import Gratitude from './components/Gratitude';
-import Settings from './components/Settings';
+import { db, setActiveProfileId } from '../db';
+import { PERSONA_META, STYLES, uid, type ChatMode, type PersonaId, type Profile, type ResponseMode, type StyleId, type VoiceLang } from '../domain';
+import { hasEnhancedVoice, speakSample, VOICE_LANG_LABELS } from '../services/tts';
 
-// v0.2 導航:Capture / Reflect / Library / Garden — 冇 Insights,冇 Statistics。
-// 設定收埋喺 Reflect 頁右上角。
-type Tab = 'reflect' | 'capture' | 'library' | 'garden';
-export type Practice = 'checkin' | 'dialogue' | 'body' | 'gratitude';
-
-function Onboarding({ onDone }: { onDone: (p: Profile) => void }) {
-  const [name, setName] = useState('');
-  async function start() {
-    const n = name.trim();
-    if (!n) return;
-    const p: Profile = {
-      id: uid(), name: n, personaId: 'aqing', responseMode: 'ask',
-      chatMode: 'companion', styleId: 'quiet', voiceLang: 'yue' as const, createdAt: Date.now(),
-    };
-    await db.profiles.add(p);
-    setActiveProfileId(p.id);
-    onDone(p);
-  }
-  return (
-    <div className="page" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', minHeight: '80dvh' }}>
-      <h1 className="serif" style={{ fontSize: 28 }}>MindGarden</h1>
-      <p className="muted" style={{ marginTop: 10, lineHeight: 1.8 }}>
-        一個每晚返嚟嘅安靜地方。<br />唔係日記,唔係打卡 — 係陪你留意自己。<br />你嘅記錄只會留喺呢部裝置。
-      </p>
-      <p style={{ marginTop: 36, fontSize: 15 }}>想我哋點稱呼你?</p>
-      <div className="card" style={{ marginTop: 12 }}>
-        <input autoFocus style={{ border: 'none', background: 'none', width: '100%', outline: 'none' }}
-          placeholder="你嘅名…" value={name} onChange={e => setName(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && start()} />
-      </div>
-      <button className="btn primary" style={{ marginTop: 20 }} onClick={start}>開始</button>
-    </div>
-  );
-}
-
-const TABS: { id: Tab; label: string; icon: JSX.Element }[] = [
-  { id: 'reflect', label: '今晚', icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M20 13A8 8 0 1111 4a6.5 6.5 0 009 9z"/></svg> },
-  { id: 'capture', label: '隨手記', icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M12 5v14M5 12h14"/></svg> },
-  { id: 'library', label: '收藏庫', icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M4 5a2 2 0 012-2h7l5 5v11a2 2 0 01-2 2H6a2 2 0 01-2-2zM13 3v5h5"/></svg> },
-  { id: 'garden', label: '花園', icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M12 21V11m0 0C12 7 9 5 5 5c0 4 3 6 7 6zm0-2c0-3 2.5-5 6-5 0 3-2.5 5-6 5z"/></svg> },
+const CHAT_MODES: { id: ChatMode; label: string; desc: string }[] = [
+  { id: 'companion', label: '溫柔陪伴', desc: '先聽你講,慢慢嚟。需要分析嗰陣一樣會分析' },
+  { id: 'open', label: '自由對話', desc: '似同朋友傾偈,你問咩佢答咩,可長可短' },
 ];
 
-export default function App() {
-  const [tab, setTab] = useState<Tab>('reflect');
-  const [practice, setPractice] = useState<Practice | null>(null);
-  const [sessionStyle, setSessionStyle] = useState<StyleId | undefined>(undefined);
-  const [showSettings, setShowSettings] = useState(false);
-  const [profileId, setProfileId] = useState<string | null>(getActiveProfileId());
-  const [ready, setReady] = useState(false);
+const MODES: { id: ResponseMode; label: string; desc: string }[] = [
+  { id: 'ask', label: '每次問我', desc: '以來電形式問你想聽定想睇' },
+  { id: 'voice', label: '直接語音', desc: '寫完直接播聲' },
+  { id: 'text', label: '純文字', desc: '安靜模式,只顯示文字' },
+];
 
-  const profile = useLiveQuery(
-    async () => (profileId ? await db.profiles.get(profileId) : undefined),
-    [profileId],
-  );
+export default function Settings({ profile, onSwitch }: { profile: Profile; onSwitch: () => void }) {
+  const profiles = useLiveQuery(() => db.profiles.orderBy('createdAt').toArray(), []) ?? [];
+  const [newName, setNewName] = useState('');
 
-  useEffect(() => {
-    (async () => {
-      const id = getActiveProfileId();
-      if (id && (await db.profiles.get(id))) setProfileId(id);
-      else {
-        const first = await db.profiles.orderBy('createdAt').first();
-        if (first) { setActiveProfileId(first.id); setProfileId(first.id); }
-        else setProfileId(null);
-      }
-      setReady(true);
-    })();
-  }, []);
+  const update = (patch: Partial<Profile>) => db.profiles.update(profile.id, patch);
 
-  if (!ready) return null;
-  if (!profileId || !profile) return <Onboarding onDone={p => setProfileId(p.id)} />;
+  async function addProfile() {
+    const name = newName.trim();
+    if (!name) return;
+    const p: Profile = { id: uid(), name, personaId: 'aqing', responseMode: 'ask', chatMode: 'companion', voiceLang: 'yue', createdAt: Date.now() };
+    await db.profiles.add(p);
+    setNewName('');
+  }
 
-  const done = () => { setPractice(null); setSessionStyle(undefined); setTab('reflect'); };
-
-  // 由「今晚你需要啲咩」入嚟:need 決定練習 + 對話風格
-  const openNeed = (n: Need) => { setSessionStyle(n.style); setPractice(n.practice); };
+  async function exportJson() {
+    const entries = await db.entries.where('profileId').equals(profile.id).toArray();
+    const blob = new Blob([JSON.stringify({ profile, entries }, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `mind-garden-${profile.name}.json`;
+    a.click();
+  }
 
   return (
-    <>
-      {practice === 'checkin' && <CheckIn key="c" profile={profile} initialStyle={sessionStyle} onDone={done} />}
-      {practice === 'dialogue' && <Dialogue key="d" profile={profile} initialStyle={sessionStyle} onDone={done} />}
-      {practice === 'body' && <Body key="b" profile={profile} onDone={done} />}
-      {practice === 'gratitude' && <Gratitude key="g" profile={profile} onDone={done} />}
+    <div className="page">
+      <h1 className="serif" style={{ fontSize: 22 }}>設定</h1>
 
-      {!practice && showSettings && (
-        <Settings profile={profile}
-          onSwitch={() => { setProfileId(getActiveProfileId()); setShowSettings(false); setTab('reflect'); }} />
-      )}
-      {!practice && !showSettings && tab === 'reflect' && (
-        <Reflect profile={profile} onNeed={openNeed} onSettings={() => setShowSettings(true)} />
-      )}
-      {!practice && !showSettings && tab === 'capture' && <Capture profile={profile} />}
-      {!practice && !showSettings && tab === 'library' && <Library profile={profile} />}
-      {!practice && !showSettings && tab === 'garden' && <Garden profile={profile} />}
+      <p className="muted" style={{ margin: '18px 0 8px' }}>你嘅名</p>
+      <div className="card">
+        <input style={{ border: 'none', background: 'none', width: '100%', outline: 'none' }}
+          value={profile.name} onChange={e => update({ name: e.target.value })} />
+      </div>
 
-      <nav className="tabbar" aria-label="主導航">
-        {TABS.map(t => (
-          <button key={t.id} className={!practice && !showSettings && tab === t.id ? 'on' : ''}
-            onClick={() => { setPractice(null); setShowSettings(false); setTab(t.id); }} aria-label={t.label}>
-            {t.icon}<span>{t.label}</span>
+      <p className="muted" style={{ margin: '18px 0 8px' }}>預設傾偈方式 · 對話途中隨時轉得</p>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+        {(Object.keys(STYLES) as StyleId[]).map(sid => (
+          <button key={sid} className="card" onClick={() => update({ styleId: sid })}
+            style={{ textAlign: 'left', padding: '12px 14px', border: (profile.styleId ?? 'quiet') === sid ? '1.5px solid var(--sage)' : '1.5px solid transparent' }}>
+            <span style={{ fontSize: 14, fontWeight: 500 }}>{STYLES[sid].emoji} {STYLES[sid].name}</span>
+            <span className="muted" style={{ display: 'block', marginTop: 3, fontSize: 11 }}>{STYLES[sid].desc}</span>
           </button>
         ))}
-      </nav>
-    </>
+      </div>
+
+      <p className="muted" style={{ margin: '18px 0 8px' }}>聲線 · 只影響語音把聲</p>
+      <div style={{ display: 'flex', gap: 8 }}>
+        {(Object.keys(PERSONA_META) as PersonaId[]).map(pid => (
+          <button key={pid} className={`chip ${profile.personaId === pid ? 'on' : ''}`} style={{ flex: 1, textAlign: 'center' }}
+            onClick={() => update({ personaId: pid })}>
+            {PERSONA_META[pid].name}
+          </button>
+        ))}
+      </div>
+
+      <p className="muted" style={{ margin: '18px 0 8px' }}>對話模式</p>
+      {CHAT_MODES.map(m => (
+        <button key={m.id} className="card" onClick={() => update({ chatMode: m.id })}
+          style={{ width: '100%', textAlign: 'left', marginBottom: 8, border: (profile.chatMode ?? 'companion') === m.id ? '1.5px solid var(--sage)' : '1.5px solid transparent' }}>
+          <span style={{ fontSize: 15, fontWeight: 500 }}>{m.label}</span>
+          <span className="muted" style={{ display: 'block', marginTop: 2, fontSize: 12 }}>{m.desc}</span>
+        </button>
+      ))}
+
+      <p className="muted" style={{ margin: '18px 0 8px' }}>回應方式</p>
+      {MODES.map(m => (
+        <button key={m.id} className="card" onClick={() => update({ responseMode: m.id })}
+          style={{ width: '100%', textAlign: 'left', marginBottom: 8, border: profile.responseMode === m.id ? '1.5px solid var(--sage)' : '1.5px solid transparent' }}>
+          <span style={{ fontSize: 15, fontWeight: 500 }}>{m.label}</span>
+          <span className="muted" style={{ display: 'block', marginTop: 2, fontSize: 12 }}>{m.desc}</span>
+        </button>
+      ))}
+
+      <p className="muted" style={{ margin: '18px 0 8px' }}>語音語言</p>
+      {(['yue','cmn','en'] as VoiceLang[]).map(lang => (
+        <button key={lang} className="card"
+          onClick={() => update({ voiceLang: lang })}
+          style={{ width:'100%', textAlign:'left', marginBottom:8, display:'flex', justifyContent:'space-between', alignItems:'center', border: (profile.voiceLang ?? 'yue') === lang ? '1.5px solid var(--sage)' : '1.5px solid transparent' }}>
+          <span>
+            <span style={{ fontSize:15, fontWeight:500 }}>{VOICE_LANG_LABELS[lang]}</span>
+            <span className="muted" style={{ marginLeft:10, fontSize:12 }}>
+              { lang === 'yue' ? '廣東話' : lang === 'cmn' ? 'Mandarin Chinese' : 'English' }
+            </span>
+          </span>
+          <button
+            style={{ fontSize:12, color:'var(--dusk-deep)', background:'var(--dusk-bg)', border:'none', borderRadius:999, padding:'5px 12px' }}
+            onClick={e => { e.stopPropagation(); speakSample(lang, profile.personaId); }}>
+            試聽
+          </button>
+        </button>
+      ))}
+
+      {!hasEnhancedVoice() && (
+        <div className="card" style={{ marginTop: 4, background: 'var(--dusk-bg)' }}>
+          <p style={{ fontSize: 12, lineHeight: 1.8, color: 'var(--dusk-deep)' }}>
+            覺得把聲太機械?iPhone 內置咗更自然嘅粵語聲,但要手動下載一次:<br />
+            <b>設定 → 輔助使用 → 朗讀內容 → 語音 → 中文(香港) → 揀「Sinji(增強)」下載</b><br />
+            下載完返嚟呢度,MindGarden 會自動用返把好聲。
+          </p>
+        </div>
+      )}
+
+      <p className="muted" style={{ margin: '18px 0 8px' }}>空間 · 每個人有自己嘅私人記錄</p>
+      {profiles.map(p => (
+        <button key={p.id} className="card" onClick={() => { setActiveProfileId(p.id); onSwitch(); }}
+          style={{ width: '100%', textAlign: 'left', marginBottom: 8, border: p.id === profile.id ? '1.5px solid var(--sage)' : '1.5px solid transparent' }}>
+          {p.name}{p.id === profile.id && <span className="muted" style={{ marginLeft: 8 }}>而家喺度</span>}
+        </button>
+      ))}
+      <div className="card" style={{ display: 'flex', gap: 10 }}>
+        <input style={{ border: 'none', background: 'none', flex: 1, outline: 'none' }}
+          placeholder="新空間嘅名…" value={newName} onChange={e => setNewName(e.target.value)} />
+        <button style={{ color: 'var(--sage-deep)', fontSize: 14 }} onClick={addProfile}>新增</button>
+      </div>
+
+      <button className="btn ghost" style={{ marginTop: 22 }} onClick={exportJson}>匯出我嘅記錄(JSON)</button>
+      <p className="muted" style={{ marginTop: 14, fontSize: 12, lineHeight: 1.7 }}>
+        所有記錄只儲存喺呢部裝置入面。MindGarden 唔係專業心理支援 — 如果你持續好辛苦,請搵信任嘅人或者專業人士傾。
+      </p>
+    </div>
   );
 }
