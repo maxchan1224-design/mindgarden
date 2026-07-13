@@ -1,13 +1,22 @@
-// Worker entry point — 新式 Cloudflare Workers (assets + script) 模式
-// 取代 functions/ 嘅 file-based routing,因為呢個 project 係 Workers project,唔係 classic Pages
+// Worker entry point — 靜態資源 + AI API
+//
+// AI 用返 Cloudflare 自己嘅 Workers AI(env.AI binding),唔係外部 Gemini/Claude API。
+// 原因:Gemini API 同 Anthropic API 都未開放俾香港(官方地區政策),
+// 直接由 Worker call 出去會撞 400/403。Workers AI 係 Cloudflare 自己平台入面行,
+// 唔使跨境連第三方,完全冇呢個地區限制,亦唔使另外攞/管理 API key。
 
 import {
   composeSystemPrompt, checkinTask, dialogueTask, summaryTask,
   type PromptContext, type PersonaId,
 } from './functions/lib/prompts';
 
+// 精簡版 Ai binding 型別(唔依賴 @cloudflare/workers-types,keep build 自足)
+interface Ai {
+  run(model: string, input: Record<string, unknown>): Promise<unknown>;
+}
+
 export interface Env {
-  GEMINI_API_KEY: string;
+  AI: Ai; // Cloudflare Workers AI binding
   ASSETS: { fetch: (request: Request) => Promise<Response> };
 }
 
@@ -23,9 +32,8 @@ interface Body {
   };
 }
 
-// gemini-flash-latest 係官方自動更新別名,唔會因為 model 改名/下架而突然壞晒
-const MODEL = 'gemini-flash-latest';
-const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
+// Qwen1.5 對中文/廣東話書面語支援穩定,喺 Cloudflare 平台內行,唔受地區封鎖影響
+const MODEL = '@cf/qwen/qwen1.5-14b-chat-awq';
 
 async function handleRespond(request: Request, env: Env): Promise<Response> {
   try {
@@ -46,39 +54,30 @@ async function handleRespond(request: Request, env: Env): Promise<Response> {
     if (body.memory) {
       task += `\n\n【背景記憶 — 對方最近七日嘅記錄,幫你記住上文下理,唔好逐條覆述】\n${body.memory}`;
     }
+    task += `\n\n請只輸出一個 JSON object,唔好加 markdown code fence,唔好加任何解釋文字。格式:{"text": "你嘅回應"}`;
 
     const system = composeSystemPrompt(ctx, task);
 
-    const contents = history.length
-      ? history.map(t => ({ role: t.role === 'ai' ? 'model' : 'user', parts: [{ text: t.text }] }))
-      : [{ role: 'user', parts: [{ text: body.payload.text || '(冇文字,只有情緒標記)' }] }];
+    const messages = [
+      { role: 'system', content: system },
+      ...(history.length
+        ? history.map(t => ({ role: t.role === 'ai' ? 'assistant' as const : 'user' as const, content: t.text }))
+        : [{ role: 'user' as const, content: body.payload.text || '(冇文字,只有情緒標記)' }]),
+    ];
 
-    const r = await fetch(`${GEMINI_URL}?key=${env.GEMINI_API_KEY}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: system }] },
-        contents,
-        generationConfig: { responseMimeType: 'application/json', temperature: 0.9, maxOutputTokens: 2000 },
-      }),
-    });
-
-    if (!r.ok) {
-      const errBody = await r.text().catch(() => '');
-      console.error('Gemini upstream error', r.status, errBody);
-      return json({
-        text: `(AI 暫時連唔到,${r.status})`,
-        safety: false,
-        debug: errBody.slice(0, 300),
-      }, 200);
+    let raw = '';
+    try {
+      const result: any = await env.AI.run(MODEL, { messages, max_tokens: 1200, temperature: 0.9 });
+      raw = result?.response ?? '';
+    } catch (aiErr: any) {
+      console.error('Workers AI error', aiErr?.message ?? aiErr);
+      return json({ text: `(AI 暫時連唔到:${aiErr?.message ?? 'unknown'})`, safety: false });
     }
-    const data = (await r.json()) as any;
-    const raw: string = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
-    const clean = raw.replace(/```json|```/g, '').trim();
 
+    const clean = raw.replace(/```json|```/g, '').trim();
     let parsed: any;
     try { parsed = JSON.parse(clean); } catch { parsed = { text: clean, safety: false }; }
-    if (typeof parsed.text !== 'string') parsed = { text: clean, safety: false };
+    if (typeof parsed.text !== 'string' || !parsed.text.trim()) parsed = { text: clean || '聽到喇,你想講多啲咩?', safety: false };
 
     return json({
       text: parsed.text,
@@ -86,7 +85,8 @@ async function handleRespond(request: Request, env: Env): Promise<Response> {
       safety: !!parsed.safety,
       offerSummary: !!parsed.offerSummary,
     });
-  } catch {
+  } catch (e: any) {
+    console.error('handleRespond error', e?.message ?? e);
     return json({ error: 'bad_request' }, 400);
   }
 }
@@ -101,7 +101,6 @@ export default {
     if (url.pathname === '/api/respond' && request.method === 'POST') {
       return handleRespond(request, env);
     }
-    // 其餘全部交俾靜態資源(index.html, JS, CSS, manifest, service worker)
     return env.ASSETS.fetch(request);
   },
 };

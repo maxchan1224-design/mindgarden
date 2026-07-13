@@ -83,7 +83,7 @@ export default function Settings({ profile, onSwitch }: { profile: Profile; onSw
           <p style={{ fontSize: 12, lineHeight: 1.8, color: 'var(--dusk-deep)' }}>
             覺得把聲太機械?iPhone 內置咗更自然嘅粵語聲,但要手動下載一次:<br />
             <b>設定 → 輔助使用 → 朗讀內容 → 語音 → 中文(香港) → 揀「Sinji(增強)」下載</b><br />
-            下載完返嚟呢度,心庭會自動用返把好聲。
+            下載完返嚟呢度,MindGarden 會自動用返把好聲。
           </p>
         </div>
       )}
@@ -103,7 +103,7 @@ export default function Settings({ profile, onSwitch }: { profile: Profile; onSw
 
       <button className="btn ghost" style={{ marginTop: 22 }} onClick={exportJson}>匯出我嘅記錄(JSON)</button>
       <p className="muted" style={{ marginTop: 14, fontSize: 12, lineHeight: 1.7 }}>
-        所有記錄只儲存喺呢部裝置入面。心庭唔係專業心理支援 — 如果你持續好辛苦,請搵信任嘅人或者專業人士傾。
+        所有記錄只儲存喺呢部裝置入面。MindGarden 唔係專業心理支援 — 如果你持續好辛苦,請搵信任嘅人或者專業人士傾。
       </p>
     </div>
   );

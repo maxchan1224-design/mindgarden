@@ -9,8 +9,8 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['icons/icon-192.png', 'icons/icon-512.png'],
       manifest: {
-        name: '心庭 Mind Garden',
-        short_name: '心庭',
+        name: 'MindGarden',
+        short_name: 'MindGarden',
         description: '每日幾分鐘,陪自己一陣',
         theme_color: '#F7F4EE',
         background_color: '#F7F4EE',

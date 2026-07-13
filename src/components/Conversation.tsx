@@ -7,7 +7,9 @@ import CallScreen from './CallScreen';
 
 type Phase = 'thinking' | 'ringing' | 'reply';
 
-// 所有功能共用嘅對話引擎:AI 回應 + 來電卡 + 多輪對話 + safety card
+// 所有功能共用嘅對話引擎。
+// 只有第一則 AI 回應先有可能出現來電卡(ask 模式)或者自動語音(voice 模式)。
+// 之後嘅 follow-up 一律淨係文字,唔會再彈電話 / 再自動讀聲 —— 想聽先撳「播放」。
 export default function Conversation({
   profile, entryId, initialText, emotions, topic, onDone,
 }: {
@@ -20,12 +22,12 @@ export default function Conversation({
 }) {
   const [phase, setPhase] = useState<Phase>('thinking');
   const [dialogue, setDialogue] = useState<DialogueTurn[]>([]);
-  const [reply, setReply] = useState('');
   const [longText, setLongText] = useState<string | undefined>();
-  const [showText, setShowText] = useState(true);
   const [followUp, setFollowUp] = useState('');
   const [safety, setSafety] = useState(false);
   const [started, setStarted] = useState(false);
+  const [isFirstReply, setIsFirstReply] = useState(true);
+  const [speaking, setSpeaking] = useState(false);
 
   async function call(history: DialogueTurn[], task: 'checkin' | 'dialogue') {
     const first = isFirstResponseToday(profile.id, todayKey());
@@ -48,6 +50,11 @@ export default function Conversation({
     return res;
   }
 
+  function playVoice(text: string) {
+    setSpeaking(true);
+    speak(text, profile.personaId, () => setSpeaking(false));
+  }
+
   // 第一次 AI 回應
   if (!started) {
     setStarted(true);
@@ -56,17 +63,15 @@ export default function Conversation({
       const res = await call([userTurn], 'checkin');
       const dlg = [userTurn, { role: 'ai' as const, text: res.text }];
       setDialogue(dlg);
-      setReply(res.text);
       setLongText(res.longText);
       setSafety(res.safety);
       await db.entries.update(entryId, { dialogue: dlg });
+
       if (res.safety || profile.responseMode === 'text') {
-        setShowText(true);
         setPhase('reply');
       } else if (profile.responseMode === 'voice') {
-        setShowText(false);
         setPhase('reply');
-        speak(res.text, profile.personaId, () => setShowText(true));
+        playVoice(res.text); // 文字即刻顯示,聲音同步播
       } else {
         setPhase('ringing');
       }
@@ -79,27 +84,27 @@ export default function Conversation({
     const next = [...dialogue, userTurn];
     setDialogue(next);
     setFollowUp('');
+    setIsFirstReply(false);
     setPhase('thinking');
     const res = await call(next, 'dialogue');
     const dlg = [...next, { role: 'ai' as const, text: res.text }];
     setDialogue(dlg);
-    setReply(res.text);
     setLongText(res.longText);
     setSafety(res.safety);
     await db.entries.update(entryId, { dialogue: dlg });
-    setPhase('reply');
-    if (!showText) speak(res.text, profile.personaId);
+    setPhase('reply'); // follow-up 一律淨文字,唔自動讀聲
   }
 
   const persona = PERSONA_META[profile.personaId];
+  const latestAi = dialogue.filter(t => t.role === 'ai').slice(-1)[0];
 
   return (
     <>
       {phase === 'ringing' && (
         <CallScreen
           personaId={profile.personaId}
-          onAccept={() => { setShowText(false); setPhase('reply'); speak(reply, profile.personaId, () => setShowText(true)); }}
-          onDecline={() => { setShowText(true); setPhase('reply'); }}
+          onAccept={() => { setPhase('reply'); playVoice(latestAi?.text ?? ''); }}
+          onDecline={() => setPhase('reply')}
         />
       )}
 
@@ -118,25 +123,24 @@ export default function Conversation({
       ))}
 
       {phase === 'thinking' && (
-        <div style={{ textAlign: 'center', paddingTop: 40 }}>
-          <div className="dot-breathe" />
-          <p className="muted">{persona.name}聽緊…</p>
+        <div className="typing-row">
+          <span className="typing-dots"><i /><i /><i /></span>
+          <p className="muted">{persona.name}打緊字</p>
         </div>
       )}
 
-      {phase === 'reply' && (
+      {phase === 'reply' && latestAi && (
         <>
           <div className="ai-card" style={{ marginTop: 14 }}>
-            <p className="who">{persona.name}{!showText && ' · 語音'}</p>
-            {showText ? (
-              <p className="say" style={{ whiteSpace: 'pre-wrap' }}>{longText || reply}</p>
-            ) : (
-              <>
-                <button className="btn ghost" onClick={() => speak(reply, profile.personaId)}>再聽一次</button>
-                <button style={{ marginTop: 10, fontSize: 13, color: 'var(--mist)' }} onClick={() => { stopSpeaking(); setShowText(true); }}>
-                  顯示文字
-                </button>
-              </>
+            <p className="who">{persona.name}</p>
+            <p className="say" style={{ whiteSpace: 'pre-wrap' }}>{longText || latestAi.text}</p>
+            {profile.responseMode !== 'text' && (
+              <button
+                style={{ marginTop: 10, fontSize: 12, color: 'var(--dusk-deep)', display: 'flex', alignItems: 'center', gap: 5 }}
+                onClick={() => speaking ? (stopSpeaking(), setSpeaking(false)) : playVoice(latestAi.text)}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M4 9v6h4l5 5V4L8 9H4z" /></svg>
+                {speaking ? '停止' : '播放語音'}
+              </button>
             )}
           </div>
 

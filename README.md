@@ -1,4 +1,4 @@
-# 心庭 Mind Garden
+# MindGarden
 
 每日幾分鐘,陪自己一陣。Offline-first PWA,粵語 AI 陪伴回應。
 
@@ -13,10 +13,11 @@
    - 揀個 repo,framework preset 揀 **Vite**
    - Build command: `npm run build`,output directory: `dist`
 
-3. **設定 AI key**
-   - 個 project → Settings → Environment variables
-   - 加 `GEMINI_API_KEY`(去 https://aistudio.google.com 免費攞)
-   - 加完 redeploy 一次
+3. **AI 唔使另外設定**
+   - AI 用嘅係 Cloudflare Workers AI(`wrangler.jsonc` 入面嘅 `ai` binding),
+     同一個 Cloudflare 帳戶自動生效,唔使另外攞 API key
+   - 之所以唔用 Gemini/Claude 直連:兩者官方 API 都未開放俾香港地區,
+     Workers AI 行喺 Cloudflare 自己平台入面,冇呢個地區限制
 
 4. **iPhone 安裝**
    - Safari 開你嘅 `xxx.pages.dev` → 分享 → 加至主畫面
@@ -52,4 +53,4 @@ Decision Journal、Future Me、cloud TTS 自然聲、加密雲端同步、跨裝
 當次內容 + 最近七日撮要會經 Cloudflare Function 送去 LLM。
 上線前請覆核 `HK_CRISIS_RESOURCES` 嘅熱線號碼。
 
-心庭唔係醫療或心理治療產品。
+MindGarden 唔係醫療或心理治療產品。

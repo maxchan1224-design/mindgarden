@@ -28,7 +28,7 @@ function Onboarding({ onDone }: { onDone: (p: Profile) => void }) {
   }
   return (
     <div className="page" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', minHeight: '80dvh' }}>
-      <h1 className="serif" style={{ fontSize: 28 }}>心庭</h1>
+      <h1 className="serif" style={{ fontSize: 28 }}>MindGarden</h1>
       <p className="muted" style={{ marginTop: 10, lineHeight: 1.8 }}>每日幾分鐘,陪自己一陣。<br />你嘅記錄只會留喺呢部裝置。</p>
       <p style={{ marginTop: 36, fontSize: 15 }}>想我哋點稱呼你?</p>
       <div className="card" style={{ marginTop: 12 }}>
@@ -42,7 +42,7 @@ function Onboarding({ onDone }: { onDone: (p: Profile) => void }) {
 }
 
 const TABS: { id: Tab; label: string; icon: JSX.Element }[] = [
-  { id: 'home', label: '心庭', icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M12 21V11m0 0C12 7 9 5 5 5c0 4 3 6 7 6zm0-2c0-3 2.5-5 6-5 0 3-2.5 5-6 5z"/></svg> },
+  { id: 'home', label: '主頁', icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M12 21V11m0 0C12 7 9 5 5 5c0 4 3 6 7 6zm0-2c0-3 2.5-5 6-5 0 3-2.5 5-6 5z"/></svg> },
   { id: 'journal', label: '日記', icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M5 4h13a1 1 0 011 1v15H6a1 1 0 01-1-1zM8 8h8M8 12h8M8 16h5"/></svg> },
   { id: 'mood', label: '起伏', icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M3 15c3-6 5 2 8-4s5 2 10-4"/></svg> },
   { id: 'settings', label: '設定', icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 00-.1-1.2l2-1.5-2-3.4-2.3 1a7 7 0 00-2-1.2L14 3h-4l-.5 2.7a7 7 0 00-2 1.2l-2.4-1-2 3.4 2 1.5a7 7 0 000 2.4l-2 1.5 2 3.4 2.3-1a7 7 0 002 1.2L10 21h4l.5-2.7a7 7 0 002-1.2l2.4 1 2-3.4-2-1.5c.06-.4.1-.8.1-1.2z"/></svg> },
