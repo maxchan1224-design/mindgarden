@@ -5,20 +5,20 @@ import Conversation from './Conversation';
 
 // 身體部位:名稱 + 喺人形圖嘅大約座標(百分比)
 const BODY_PARTS = [
-  { key: '頭',   cx: 50, cy: 9  },
-  { key: '頸',   cx: 50, cy: 17 },
-  { key: '左肩', cx: 31, cy: 24 },
-  { key: '右肩', cx: 69, cy: 24 },
-  { key: '胸口', cx: 50, cy: 31 },
-  { key: '胃',   cx: 50, cy: 41 },
-  { key: '背',   cx: 50, cy: 36 },
-  { key: '左手', cx: 20, cy: 48 },
-  { key: '右手', cx: 80, cy: 48 },
-  { key: '腰',   cx: 50, cy: 51 },
-  { key: '左腿', cx: 38, cy: 66 },
-  { key: '右腿', cx: 62, cy: 66 },
-  { key: '左腳', cx: 38, cy: 85 },
-  { key: '右腳', cx: 62, cy: 85 },
+  { key: '頭',   cx: 50, cy: 18 },
+  { key: '頸',   cx: 50, cy: 36 },
+  { key: '左肩', cx: 34, cy: 48 },
+  { key: '右肩', cx: 66, cy: 48 },
+  { key: '胸口', cx: 50, cy: 58 },
+  { key: '背',   cx: 50, cy: 68 },
+  { key: '胃',   cx: 50, cy: 78 },
+  { key: '腰',   cx: 50, cy: 90 },
+  { key: '左手', cx: 27, cy: 100 },
+  { key: '右手', cx: 73, cy: 100 },
+  { key: '左腿', cx: 42, cy: 130 },
+  { key: '右腿', cx: 58, cy: 130 },
+  { key: '左腳', cx: 43, cy: 172 },
+  { key: '右腳', cx: 57, cy: 172 },
 ];
 
 // 人形 SVG 路徑
@@ -31,39 +31,64 @@ function BodyFigure({
 }) {
   const markedKeys = new Set(marks.map(m => m.part));
   return (
-    <svg viewBox="0 0 100 100" style={{ width: '100%', maxWidth: 200, display: 'block', margin: '0 auto' }}
+    <svg viewBox="0 0 100 200" style={{ width: '100%', maxWidth: 175, display: 'block', margin: '0 auto' }}
       role="img" aria-label="人形圖,可以撳身體各部位">
-      {/* 人形輪廓 */}
-      {/* 頭 */}
-      <ellipse cx="50" cy="9" rx="7" ry="7.5" fill="var(--sage-bg)" stroke="var(--sage)" strokeWidth="0.8" />
-      {/* 頸 */}
-      <rect x="47" y="16" width="6" height="4" rx="1" fill="var(--sage-bg)" stroke="var(--sage)" strokeWidth="0.8" />
-      {/* 身體 */}
-      <rect x="36" y="20" width="28" height="34" rx="5" fill="var(--sage-bg)" stroke="var(--sage)" strokeWidth="0.8" />
-      {/* 左手臂 */}
-      <rect x="24" y="21" width="11" height="32" rx="4" fill="var(--sage-bg)" stroke="var(--sage)" strokeWidth="0.8" />
-      {/* 右手臂 */}
-      <rect x="65" y="21" width="11" height="32" rx="4" fill="var(--sage-bg)" stroke="var(--sage)" strokeWidth="0.8" />
-      {/* 左腿 */}
-      <rect x="36" y="55" width="12" height="34" rx="4" fill="var(--sage-bg)" stroke="var(--sage)" strokeWidth="0.8" />
-      {/* 右腿 */}
-      <rect x="52" y="55" width="12" height="34" rx="4" fill="var(--sage-bg)" stroke="var(--sage)" strokeWidth="0.8" />
+      {/* 自然人形輪廓 — 單線描邊 */}
+      <path
+        d="M50 6
+           C57 6 62 12 62 20
+           C62 25 60 30 57 33
+           C56 35 56 37 57 38
+           C63 40 70 44 73 50
+           C76 57 77 67 78 78
+           C79 88 79 96 78 104
+           C77 110 74 112 72 111
+           C70 110 70 106 70 100
+           C70 92 69 82 67 74
+           C67 84 67 92 66 100
+           C65 110 64 118 64 126
+           C64 138 63 152 61 166
+           C60 174 59 180 58 186
+           C57 190 54 191 52 190
+           C50 189 50 186 50 182
+           C50 172 51 160 51 148
+           C51 138 51 130 50 124
+           C49 130 49 138 49 148
+           C49 160 50 172 50 182
+           C50 186 50 189 48 190
+           C46 191 43 190 42 186
+           C41 180 40 174 39 166
+           C37 152 36 138 36 126
+           C36 118 35 110 34 100
+           C33 92 33 84 33 74
+           C31 82 30 92 30 100
+           C30 106 30 110 28 111
+           C26 112 23 110 22 104
+           C21 96 21 88 22 78
+           C23 67 24 57 27 50
+           C30 44 37 40 43 38
+           C44 37 44 35 43 33
+           C40 30 38 25 38 20
+           C38 12 43 6 50 6 Z"
+        fill="var(--sage-bg)"
+        stroke="var(--sage)"
+        strokeWidth="0.9"
+        strokeLinejoin="round"
+      />
 
-      {/* tap 熱點:每個部位一個透明圓,揀咗就有顏色 */}
+      {/* tap 熱點 */}
       {BODY_PARTS.map(p => {
         const isActive = activePart === p.key;
         const isMarked = markedKeys.has(p.key);
         return (
           <g key={p.key} onClick={() => onTap(p.key)} style={{ cursor: 'pointer' }}>
             <circle
-              cx={p.cx} cy={p.cy} r="7"
+              cx={p.cx} cy={p.cy} r="9"
               fill={isActive ? '#8D87AD' : isMarked ? '#B7B2CC' : 'transparent'}
-              fillOpacity={isActive ? 0.7 : isMarked ? 0.5 : 0}
-              stroke={isActive || isMarked ? '#8D87AD' : 'transparent'}
-              strokeWidth="0.8"
+              fillOpacity={isActive ? 0.55 : isMarked ? 0.4 : 0}
             />
-            {isMarked && !isActive && (
-              <circle cx={p.cx} cy={p.cy} r="2.5" fill="#8D87AD" />
+            {isMarked && (
+              <circle cx={p.cx} cy={p.cy} r="3" fill="#8D87AD" />
             )}
           </g>
         );
