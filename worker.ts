@@ -32,10 +32,12 @@ interface Body {
   };
 }
 
-// Llama 3.1 8B Instruct(Fast 版)— 官方目錄確認現行未下架嘅版本
-// (原本嘅 @cf/meta/llama-3.1-8b-instruct 喺 2026-05-30 被下架,-fast 係接替版本)。
-// 非 reasoning model,亦唔屬於 private model 分類,唔會撞 5016/5018。
-const MODEL = '@cf/meta/llama-3.1-8b-instruct-fast';
+// Llama 3.3 70B(fp8 量化,速度優化版)— Workers AI 免費層入面最大、最有深度嘅
+// 非 reasoning model。8B 版本回應太淺薄,70B 有效參數多接近 9 倍。
+//
+// ⚠️ Neuron 消耗率比 8B 高好多。免費層每日 10,000 Neurons,
+// 如果多人同時用,有機會一日內爆額度(error 3036),第二日先重置。
+const MODEL = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
 
 async function handleRespond(request: Request, env: Env): Promise<Response> {
   try {
@@ -119,9 +121,30 @@ async function handleRespond(request: Request, env: Env): Promise<Response> {
     try { parsed = JSON.parse(clean); } catch { parsed = { text: clean, safety: false }; }
     if (typeof parsed.text !== 'string' || !parsed.text.trim()) parsed = { text: clean || '聽到喇,你想講多啲咩?', safety: false };
 
-    // 後處理:model 唔聽話嗰陣,喺 code 層強制剪走重複嘅開場白。
-    // Prompt 講一百次都好,細 model 一樣會照犯 — 所以呢層一定要有。
+    // ── 後處理層 ──
+    // Prompt 講幾多次都好,model 一樣會犯規。呢層係最後防線。
     let finalText: string = parsed.text;
+
+    // (a) 強制粵語化:Llama 中文係第二語言,好易飄返普通話。
+    //     只換獨立出現嘅普通話虛詞,避免誤傷專有名詞。
+    const MANDARIN_FIXES: [RegExp, string][] = [
+      [/沒有/g, '冇'],
+      [/什麼/g, '咩'],
+      [/怎麼/g, '點'],
+      [/今天/g, '今日'],
+      [/明天/g, '聽日'],
+      [/昨天/g, '琴日'],
+      [/我們/g, '我哋'],
+      [/你們/g, '你哋'],
+      [/他們/g, '佢哋'],
+      [/這個/g, '呢個'],
+      [/那個/g, '嗰個'],
+      [/這樣/g, '咁樣'],
+      [/那樣/g, '嗰樣'],
+      [/可以嗎/g, '得唔得'],
+      [/對不對/g, '係咪'],
+    ];
+    for (const [re, rep] of MANDARIN_FIXES) finalText = finalText.replace(re, rep);
     const isFirstTurn = history.length <= 1;
     if (!isFirstTurn) {
       // 唔係第一句就唔准有呢啲開場白
