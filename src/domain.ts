@@ -31,10 +31,22 @@ export interface Profile {
   createdAt: number;
 }
 
-export const PERSONA_META: Record<PersonaId, { name: string; tagline: string; rate: number; pitch: number }> = {
-  aqing: { name: '阿晴', tagline: '溫柔嘅大姊姊', rate: 0.88, pitch: 1.05 },
-  hiulaam: { name: '曉嵐', tagline: '沉穩嘅導師', rate: 0.95, pitch: 0.95 },
-  siuching: { name: '小澄', tagline: '同行嘅朋友', rate: 1.0, pitch: 1.1 },
+export const PERSONA_META: Record<PersonaId, { name: string; tagline: string; bio: string; rate: number; pitch: number }> = {
+  aqing: {
+    name: '阿晴', tagline: '溫柔嘅大姊姊',
+    bio: '三十幾歲,做過社工。自己捱過一段長時間嘅低潮,所以佢明白唔係所有嘢「諗開啲」就解決到。佢唔會急住幫你搞掂件事 — 佢會先陪你坐一陣。',
+    rate: 0.88, pitch: 1.05,
+  },
+  hiulaam: {
+    name: '曉嵐', tagline: '沉穩嘅導師',
+    bio: '四十幾歲,喺大機構做過管理層,後來轉做人生教練。見過好多人喺人生交叉點掙扎。佢唔會氹你,但佢永遠企喺你嗰邊 — 佢會幫你睇清楚件事嘅真實形狀。',
+    rate: 0.95, pitch: 0.95,
+  },
+  siuching: {
+    name: '小澄', tagline: '同行嘅朋友',
+    bio: '二十幾歲,同你差唔多年紀,一樣喺度撞板同摸索。佢唔會扮專家 — 佢會同你一齊鬧、一齊笑、一齊諗。係嗰個你可以半夜三點 send message 嘅朋友。',
+    rate: 1.0, pitch: 1.1,
+  },
 };
 
 // 情緒輪:valence(-1..1)俾心情曲線用
