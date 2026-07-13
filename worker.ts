@@ -114,8 +114,22 @@ async function handleRespond(request: Request, env: Env): Promise<Response> {
     try { parsed = JSON.parse(clean); } catch { parsed = { text: clean, safety: false }; }
     if (typeof parsed.text !== 'string' || !parsed.text.trim()) parsed = { text: clean || '聽到喇,你想講多啲咩?', safety: false };
 
+    // 後處理:model 唔聽話嗰陣,喺 code 層強制剪走重複嘅開場白。
+    // Prompt 講一百次都好,細 model 一樣會照犯 — 所以呢層一定要有。
+    let finalText: string = parsed.text;
+    const isFirstTurn = history.length <= 1;
+    if (!isFirstTurn) {
+      // 唔係第一句就唔准有呢啲開場白
+      finalText = finalText.replace(
+        /^\s*(聽到喇|聽到你講[，,]?|我聽到你[^，,。]{0,6}[，,]?|明白[，,]?|我明白你[^，,。]{0,6}[，,]?)\s*[，,。]?\s*/,
+        '',
+      );
+    }
+    finalText = finalText.trim();
+    if (!finalText) finalText = parsed.text; // 剪到空就用返原文
+
     return json({
-      text: parsed.text,
+      text: finalText,
       longText: typeof parsed.longText === 'string' ? parsed.longText : undefined,
       safety: !!parsed.safety,
       offerSummary: !!parsed.offerSummary,
