@@ -1,68 +1,89 @@
-# MindGarden
+import { PERSONA_META, type PersonaId, type VoiceLang } from '../domain';
 
-每日幾分鐘,陪自己一陣。Offline-first PWA,粵語 AI 陪伴回應。
+let voiceCache: Record<string, SpeechSynthesisVoice | null> = {};
 
-## 快速部署(唔使本地 toolchain)
+// 每種語言嘅搜尋策略:揀 Enhanced/Premium 先,其次 localService,最後任何匹配
+function pickVoice(lang: VoiceLang): SpeechSynthesisVoice | null {
+  if (voiceCache[lang] !== undefined) return voiceCache[lang];
 
-1. **上載去 GitHub**
-   - 開一個新 repo(private 都得)
-   - 將呢個 folder 全部內容 push 上去(唔使包括 `node_modules` / `dist`)
+  const all = window.speechSynthesis?.getVoices() ?? [];
 
-2. **連接 Cloudflare Pages**
-   - Cloudflare dashboard → Workers & Pages → Create → Pages → Connect to Git
-   - 揀個 repo,framework preset 揀 **Vite**
-   - Build command: `npm run build`,output directory: `dist`
+  const FALLBACK_MAP: Record<VoiceLang, string[]> = {
+    yue: ['zh-HK', 'zh_HK'],
+    cmn: ['zh-CN', 'zh_CN', 'zh-TW', 'zh'],
+    en:  ['en-GB', 'en-AU', 'en-US', 'en'],
+  };
+  const tags = FALLBACK_MAP[lang];
+  const pool = all.filter(v => tags.some((tag: string) => v.lang.startsWith(tag)));
 
-3. **AI 唔使另外設定**
-   - AI 用嘅係 Cloudflare Workers AI(`wrangler.jsonc` 入面嘅 `ai` binding),
-     同一個 Cloudflare 帳戶自動生效,唔使另外攞 API key
-   - 之所以唔用 Gemini/Claude 直連:兩者官方 API 都未開放俾香港地區,
-     Workers AI 行喺 Cloudflare 自己平台入面,冇呢個地區限制
+  const picked =
+    pool.find(v => /enhanced|premium/i.test(v.name)) ||
+    pool.find(v => v.localService) ||
+    pool[0] ||
+    null;
 
-4. **iPhone 安裝**
-   - Safari 開你嘅 `xxx.pages.dev` → 分享 → 加至主畫面
+  voiceCache[lang] = picked;
+  return picked;
+}
 
-之後每次 push 到 main 就自動 deploy;push 到其他 branch 會有獨立 preview URL。
+// 三語對應嘅 BCP-47 tag(傳俾 SpeechSynthesisUtterance.lang)
+const LANG_BCP47: Record<VoiceLang, string> = {
+  yue: 'zh-HK',
+  cmn: 'zh-CN',
+  en:  'en-GB',
+};
 
-## v0.2 — Awareness Companion 重新設計(見 REDESIGN.md)
+// 讀出有話俾 user 知係邊把聲嘅簡單描述(喺設定頁試聽用)
+export const VOICE_LANG_LABELS: Record<VoiceLang, string> = {
+  yue: '粵語',
+  cmn: '普通話',
+  en:  'English',
+};
 
-- 開場改問「今晚你需要啲咩?」— 四張 need 卡直接帶你去啱嘅練習 + 風格
-- 六種對話風格取代 persona 人物(安靜陪伴/反思/理性思考/深度對話/腦震盪/鼓勵),對話中途隨時轉
-- 導航變成:今晚 / 隨手記 / 收藏庫 / 花園
-- 🌱 Seeds:重要嘅一句話會喺花園慢慢生長(🌱→🌿→🌳)
-- 季節 check-in(春夏秋冬)取代好/壞心情;只揀季節都算完成
-- 花園分類:記錄自動歸入 🌸感恩 🌿學習 🌻工作 🌳關係 🌹回憶 🍃放低 🌼夢想
-- 👁 覺察:AI 睇最近十四日,只講有記錄支持嘅 pattern,唔分析唔建議
-- ⏳ 時間囊:寫俾一年/三年/五年後嘅自己,時間未到打唔開
-- 🌙 Silence:逢星期日唔使寫,陪你坐一分鐘
+// iOS voice list 係 lazy load,預熱一次
+if ('speechSynthesis' in window) {
+  window.speechSynthesis.onvoiceschanged = () => {
+    voiceCache = {};
+  };
+}
 
-## 已有功能(v0.1)
+export function speak(
+  text: string,
+  personaId: PersonaId,
+  voiceLang: VoiceLang = 'yue',
+  onEnd?: () => void,
+): boolean {
+  if (!('speechSynthesis' in window)) return false;
+  window.speechSynthesis.cancel();
 
-- 首頁植物:由種子開始,按累積活躍日數生長(唔係 streak,永遠唔會枯萎)
-- 情緒簽到:多選情緒 + 強度 + 自由書寫
-- AI 回應:三個 persona(阿晴/曉嵐/小澄),先反映後一問,永不說教
-- 語音回應:iOS 系統粵語聲(免費、offline);「每次問我」模式會彈出來電畫面
-- 對話延續:「想傾多啲」多輪對話,全 history 帶入每次請求
-- 跨日記憶:最近七日記錄自動注入 prompt,AI 記得你講過嘅嘢
-- 心情起伏:7/30日 valence 曲線,冇記錄嘅日子留 gap 唔會跌零
-- 多空間:同一部機可開多個 profile,記錄完全隔離
-- Safety layer:危機字眼觸發時停止提問,顯示香港支援熱線
-- 匯出 JSON;所有數據只存本機 IndexedDB
+  const u = new SpeechSynthesisUtterance(text);
+  const v = pickVoice(voiceLang);
+  if (v) u.voice = v;
+  u.lang = LANG_BCP47[voiceLang];
+  u.rate = PERSONA_META[personaId].rate;
+  u.pitch = PERSONA_META[personaId].pitch;
+  if (onEnd) u.onend = onEnd;
 
-## 未做(roadmap)
+  window.speechSynthesis.speak(u);
+  return true;
+}
 
-Body map、小確幸、日結/週結、Insights dashboard、Life Wiki、Growth Book、
-Decision Journal、Future Me、cloud TTS 自然聲、加密雲端同步、跨裝置帳戶。
+export function stopSpeaking() {
+  window.speechSynthesis?.cancel();
+}
 
-## 換 AI model
+// 試聽:喺設定頁俾用戶撳掣聽吓把聲
+export function speakSample(voiceLang: VoiceLang, personaId: PersonaId) {
+  const samples: Record<VoiceLang, string> = {
+    yue: '你好,我係你嘅陪伴。',
+    cmn: '你好，我是你的陪伴。',
+    en:  'Hello, I\'m here with you.',
+  };
+  speak(samples[voiceLang], personaId, voiceLang);
+}
 
-改 `functions/api/respond.ts` 入面嘅 `MODEL` / `GEMINI_URL` / `callModel` 部分。
-所有 prompt 喺 `functions/lib/prompts.ts`,係唯一真相來源。
-
-## 隱私
-
-所有記錄存喺用戶裝置嘅 IndexedDB。只有觸發 AI 回應嗰刻,
-當次內容 + 最近七日撮要會經 Cloudflare Function 送去 LLM。
-上線前請覆核 `HK_CRISIS_RESOURCES` 嘅熱線號碼。
-
-MindGarden 唔係醫療或心理治療產品。
+export function hasEnhancedVoice(lang: VoiceLang = 'yue'): boolean {
+  const all = window.speechSynthesis?.getVoices() ?? [];
+  const tags = { yue: 'zh-HK', cmn: 'zh-CN', en: 'en' }[lang];
+  return all.some(v => v.lang.startsWith(tags) && /enhanced|premium/i.test(v.name));
+}
