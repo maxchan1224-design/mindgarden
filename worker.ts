@@ -32,8 +32,9 @@ interface Body {
   };
 }
 
-// Qwen1.5 已於 2025-10-01 被 Cloudflare 下架,改用現行嘅 Qwen3(MoE,快、中文能力更強)
-const MODEL = '@cf/qwen/qwen3-30b-a3b-fp8';
+// Mistral Small 24B — dense model(24B 參數全部激活),對比 Qwen3-30B-A3B(MoE,實際只激活 3B)
+// 有效參數多好多倍,回應深度同語言質素高得多。128K context。
+const MODEL = '@cf/mistralai/mistral-small-3.1-24b-instruct';
 
 async function handleRespond(request: Request, env: Env): Promise<Response> {
   try {
@@ -74,10 +75,7 @@ async function handleRespond(request: Request, env: Env): Promise<Response> {
       const result: any = await env.AI.run(MODEL, {
         messages,
         max_tokens: 2000,
-        temperature: 0.9,
-        // Qwen3 係 reasoning model,預設會先「諗」再答,思考內容會食晒 token 令 content 變 null。
-        // 我哋淨係要佢傾偈,唔需要推理,所以關咗 thinking。
-        chat_template_kwargs: { thinking: false },
+        temperature: 0.85,
       });
       raw =
         (typeof result === 'string' ? result : '') ||
@@ -154,7 +152,6 @@ async function handleDebug(env: Env): Promise<Response> {
     const result: any = await env.AI.run(MODEL, {
       messages: [{ role: 'user', content: '用一句廣東話講聲你好。' }],
       max_tokens: 500,
-      chat_template_kwargs: { thinking: false },
     });
     return json({ ok: true, model: MODEL, raw: result });
   } catch (e: any) {
