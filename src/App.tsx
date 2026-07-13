@@ -20,7 +20,7 @@ function Onboarding({ onDone }: { onDone: (p: Profile) => void }) {
     if (!n) return;
     const p: Profile = {
       id: uid(), name: n, personaId: 'aqing', responseMode: 'ask',
-      chatMode: 'companion', createdAt: Date.now(),
+      chatMode: 'companion', voiceLang: 'yue' as const, createdAt: Date.now(),
     };
     await db.profiles.add(p);
     setActiveProfileId(p.id);
