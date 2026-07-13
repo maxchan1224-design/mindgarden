@@ -2,6 +2,7 @@ export type EntryType = 'checkin' | 'gratitude' | 'thought' | 'dialogue' | 'body
 export type PersonaId = 'aqing' | 'hiulaam' | 'siuching';
 export type ResponseMode = 'ask' | 'voice' | 'text';
 export type ChatMode = 'companion' | 'open';
+export type VoiceLang = 'yue' | 'cmn' | 'en';
 
 export interface Emotion { name: string; intensity: number; }
 
@@ -26,6 +27,7 @@ export interface Profile {
   personaId: PersonaId;
   responseMode: ResponseMode;
   chatMode: ChatMode;      // companion = 溫柔陪伴 / open = 自由對話
+  voiceLang: VoiceLang;    // yue = 粵語 / cmn = 普通話 / en = 英文
   createdAt: number;
 }
 
