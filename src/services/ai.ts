@@ -29,10 +29,10 @@ interface RequestBody {
   };
 }
 
-const FALLBACK: AiReply = {
-  text: '聽到喇,已經幫你記低。今日肯停低寫幾句,已經係照顧咗自己。',
-  safety: false,
-};
+// 出錯時唔再扮成一句溫柔說話 —— 誠實講明係技術問題,唔好呃用戶以為 AI 有回應過
+function errorReply(detail: string): AiReply {
+  return { text: `(連唔到 AI:${detail})`, safety: false };
+}
 
 export async function askAi(body: RequestBody): Promise<AiReply> {
   try {
@@ -41,11 +41,18 @@ export async function askAi(body: RequestBody): Promise<AiReply> {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    if (!r.ok) return FALLBACK;
-    const data = await r.json();
-    if (typeof data?.text !== 'string' || !data.text.trim()) return FALLBACK;
+    const bodyText = await r.text();
+    if (!r.ok) return errorReply(`HTTP ${r.status} ${bodyText.slice(0, 120)}`);
+
+    let data: any;
+    try { data = JSON.parse(bodyText); }
+    catch { return errorReply(`回應唔係 JSON: ${bodyText.slice(0, 120)}`); }
+
+    if (typeof data?.text !== 'string' || !data.text.trim()) {
+      return errorReply(`回應冇 text 欄位: ${bodyText.slice(0, 120)}`);
+    }
     return { text: data.text, longText: data.longText, safety: !!data.safety, offerSummary: !!data.offerSummary };
-  } catch {
-    return FALLBACK;
+  } catch (e: any) {
+    return errorReply(e?.message ?? String(e));
   }
 }

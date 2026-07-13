@@ -65,13 +65,27 @@ async function handleRespond(request: Request, env: Env): Promise<Response> {
         : [{ role: 'user' as const, content: body.payload.text || '(冇文字,只有情緒標記)' }]),
     ];
 
+    if (!env.AI || typeof env.AI.run !== 'function') {
+      return json({ text: '(AI binding 未生效,請喺 Cloudflare dashboard 檢查 Workers AI binding)', safety: false });
+    }
+
     let raw = '';
     try {
       const result: any = await env.AI.run(MODEL, { messages, max_tokens: 1200, temperature: 0.9 });
-      raw = result?.response ?? '';
+      // 唔同 model 返嘅結構唔一樣,逐個試
+      raw =
+        (typeof result === 'string' ? result : '') ||
+        result?.response ||
+        result?.result?.response ||
+        result?.choices?.[0]?.message?.content ||
+        '';
+      if (!raw) {
+        console.error('Unexpected AI result shape', JSON.stringify(result).slice(0, 400));
+        return json({ text: `(AI 回應格式唔識讀:${JSON.stringify(result).slice(0, 150)})`, safety: false });
+      }
     } catch (aiErr: any) {
       console.error('Workers AI error', aiErr?.message ?? aiErr);
-      return json({ text: `(AI 暫時連唔到:${aiErr?.message ?? 'unknown'})`, safety: false });
+      return json({ text: `(AI 出錯:${aiErr?.message ?? 'unknown'})`, safety: false });
     }
 
     const clean = raw.replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/```json|```/g, '').trim();
@@ -86,8 +100,9 @@ async function handleRespond(request: Request, env: Env): Promise<Response> {
       offerSummary: !!parsed.offerSummary,
     });
   } catch (e: any) {
-    console.error('handleRespond error', e?.message ?? e);
-    return json({ error: 'bad_request' }, 400);
+    console.error('handleRespond error', e?.stack ?? e?.message ?? e);
+    // 永遠返 200,將真正錯誤訊息當成 AI 回應顯示出嚟,方便喺手機直接睇到病因
+    return json({ text: `(出錯咗:${e?.message ?? String(e)})`, safety: false });
   }
 }
 
@@ -95,9 +110,28 @@ function json(obj: unknown, status = 200): Response {
   return new Response(JSON.stringify(obj), { status, headers: { 'Content-Type': 'application/json' } });
 }
 
+// 診斷端點:直接喺瀏覽器開 /api/debug 就知 AI 通唔通
+async function handleDebug(env: Env): Promise<Response> {
+  if (!env.AI || typeof env.AI.run !== 'function') {
+    return json({ ok: false, stage: 'binding', error: 'env.AI 唔存在' });
+  }
+  try {
+    const result: any = await env.AI.run(MODEL, {
+      messages: [{ role: 'user', content: '用一句廣東話講聲你好。' }],
+      max_tokens: 100,
+    });
+    return json({ ok: true, model: MODEL, raw: result });
+  } catch (e: any) {
+    return json({ ok: false, stage: 'ai.run', model: MODEL, error: e?.message ?? String(e) });
+  }
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+    if (url.pathname === '/api/debug') {
+      return handleDebug(env);
+    }
     if (url.pathname === '/api/respond' && request.method === 'POST') {
       return handleRespond(request, env);
     }
